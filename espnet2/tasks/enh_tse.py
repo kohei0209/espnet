@@ -305,7 +305,6 @@ class TargetSpeakerExtractionTask(AbsTask):
     @classmethod
     def build_model(cls, args: argparse.Namespace) -> ESPnetExtractionModel:
         assert check_argument_types()
-
         encoder = encoder_choices.get_class(args.encoder)(**args.encoder_conf)
         extractor = extractor_choices.get_class(args.extractor)(
             encoder.output_dim, **args.extractor_conf
