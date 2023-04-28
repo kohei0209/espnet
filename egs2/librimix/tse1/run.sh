@@ -22,6 +22,6 @@ test_sets="test "
     --ref_num 2 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
     --lang en \
-    --ngpu 4 \
+    --ngpu 2 \
     --enh_config ./conf/train.yaml \
     "$@"

@@ -8,6 +8,7 @@ from typeguard import check_argument_types, check_return_type
 from espnet2.enh.espnet_model_tse import ESPnetExtractionModel
 from espnet2.enh.extractor.abs_extractor import AbsExtractor
 from espnet2.enh.extractor.td_speakerbeam_extractor import TDSpeakerBeamExtractor
+from espnet2.enh.extractor.asenet import ASENet
 from espnet2.tasks.abs_task import AbsTask
 from espnet2.tasks.enh import (
     criterion_choices,
@@ -28,6 +29,7 @@ extractor_choices = ClassChoices(
     name="extractor",
     classes=dict(
         td_speakerbeam=TDSpeakerBeamExtractor,
+        asenet=ASENet,
     ),
     type_check=AbsExtractor,
     default="td_speakerbeam",
