@@ -60,39 +60,39 @@ class ASENet(AbsExtractor):
             dropout=dropout_p,
             bidirectional=True,
         )
-        self.separator_linear1 = nn.Linear(separator_hidden_dim, maskestimator_hidden_dim)
-        self.separator_linear2 = nn.Linear(separator_hidden_dim, maskestimator_hidden_dim)
+        self.separator_linear1 = nn.Linear(separator_hidden_dim*2, maskestimator_hidden_dim)
+        self.separator_linear2 = nn.Linear(separator_hidden_dim*2, maskestimator_hidden_dim)
 
         # attention modules
-        self.mlp1 = nn.ModuleList([
+        self.mlp1 = nn.Sequential(
             nn.Linear(maskestimator_hidden_dim, maskestimator_hidden_dim),
             nn.Linear(maskestimator_hidden_dim, maskestimator_hidden_dim),
             nn.ReLU(),
-        ])
+        )
 
-        self.mlp2 = nn.ModuleList([
+        self.mlp2 = nn.Sequential(
             nn.Linear(maskestimator_hidden_dim, maskestimator_hidden_dim),
             nn.Linear(maskestimator_hidden_dim, maskestimator_hidden_dim),
             nn.ReLU(),
-        ])
+        )
 
-        self.mlp_aux = nn.ModuleList([
-            nn.Linear(maskestimator_hidden_dim, maskestimator_hidden_dim),
+        self.mlp_aux = nn.Sequential(
+            nn.Linear(n_freqs, maskestimator_hidden_dim),
             nn.Linear(maskestimator_hidden_dim, maskestimator_hidden_dim),
             nn.ReLU(),
-        ])
+        )
 
-        self.W_v = self.linear(maskestimator_hidden_dim, maskestimator_hidden_dim)
-        self.W_iv = self.linear(maskestimator_hidden_dim, maskestimator_hidden_dim)
-        self.W_aux = self.linear(maskestimator_hidden_dim, maskestimator_hidden_dim)
-        self.w = self.linear(maskestimator_hidden_dim, 1)
+        self.W_v = nn.Linear(maskestimator_hidden_dim, maskestimator_hidden_dim)
+        self.W_iv = nn.Linear(maskestimator_hidden_dim, maskestimator_hidden_dim)
+        self.W_aux = nn.Linear(maskestimator_hidden_dim, maskestimator_hidden_dim)
+        self.w = nn.Linear(maskestimator_hidden_dim, 1)
 
         self.attention_activation = nn.Tanh()
         self.softmax = nn.Softmax(dim=-3)
         self.alpha = 2
 
         # mask estimator modules
-        self.mask_estimator = nn.ModuleList([
+        self.mask_estimator = nn.Sequential(
             nn.LSTM(
                 maskestimator_hidden_dim,
                 maskestimator_hidden_dim,
@@ -100,9 +100,9 @@ class ASENet(AbsExtractor):
                 dropout=dropout_p,
                 bidirectional=True,
             ),
-            nn.Linear(maskestimator_hidden_dim, n_freqs),
+            nn.Linear(maskestimator_hidden_dim*2, n_freqs),
             nn.Sigmoid()
-        ])
+        )
 
 
     def forward(
@@ -132,12 +132,13 @@ class ASENet(AbsExtractor):
                 f'enroll_emb{suffix_tag}': torch.Tensor(Batch, adapt_enroll_dim/adapt_enroll_dim*2),
             ]
         """  # noqa: E501
-        batch = self.enc(input, ilens)[0]  # [B, T, F]
+        # import pdb; pdb.set_trace()
+        # batch = self.enc(input, ilens)[0]  # [B, T, F]
         # feature = batch.transpose(1, 2) # [B, T, F]
-        feature = abs(batch)
+        feature = abs(input)
 
         # separator part
-        feature = self.separator(feature)
+        feature, _ = self.separator(feature)
         Z1 = self.separator_linear1(feature)
         Z2 = self.separator_linear2(feature)
         Z = torch.stack((Z1, Z2), dim=1) # [B, I, T, F]
@@ -147,19 +148,19 @@ class ASENet(AbsExtractor):
         s_v2 = self.mlp2(Z).mean(dim=-2, keepdim=True) # [B, I, 1, F]
 
         if input_aux is not None:
-            aux_batch = self.enc(input_aux, ilens_aux)[0]  # [B, S, T, F]
+            # aux_batch = self.enc(input_aux, ilens_aux)[0]  # [B, S, T, F]
             # aux_feature = aux_batch.transpose(1, 2) # [B, T, F]
-            aux_feature = abs(aux_batch)
-            s_aux = self.mlp_aux(aux_feature).mean(dim=-2, leepdim=True) # [B, S, 1, F]
+            aux_feature = abs(input_aux)
+            s_aux = self.mlp_aux(aux_feature).mean(dim=-2, keepdim=True) # [B, S, 1, F]
 
             # e: [B, S, I, T, F], a: [B, S, I, T, 1]
             e = self.W_v(s_v)[..., None, :, :, :] + self.W_iv(s_v2)[..., None, :, :, :] + self.W_aux(s_aux)[..., None, :, :]
             e = self.w(self.attention_activation(e))
             a = self.softmax(e/self.alpha)
         # to do: write "else" part
-
+        print(a.shape, Z.shape)
         z_att = (a * Z[..., None, :, : ,:]).sum(dim=-3) # [B, S, T, F]
-
+        print(z_att.shape)
         # mask estimation part
         masks = self.mask_estimator(z_att) # [B, S, T, F]
         assert masks.shape[-3] == 1  # currently assuming #spks=1

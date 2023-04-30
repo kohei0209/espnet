@@ -45,9 +45,8 @@ load_all_speakers: false
 
 extractor: asenet
 extractor_conf:
-    input_dim: null
-    n_fft: 128
-    stride: 64
+    n_fft: 512
+    stride: 128
     window: hann
     separator_hidden_dim: 512
     separator_num_layers: 1
