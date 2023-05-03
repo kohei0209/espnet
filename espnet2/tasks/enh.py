@@ -50,6 +50,8 @@ from espnet2.enh.separator.dccrn_separator import DCCRNSeparator
 from espnet2.enh.separator.dpcl_e2e_separator import DPCLE2ESeparator
 from espnet2.enh.separator.dpcl_separator import DPCLSeparator
 from espnet2.enh.separator.dprnn_separator import DPRNNSeparator
+from espnet2.enh.separator.dprnn_eda_separator import DPRNNEDASeparator
+from espnet2.enh.extractor.asenet import ASENet
 from espnet2.enh.separator.dptnet_separator import DPTNetSeparator
 from espnet2.enh.separator.fasnet_separator import FaSNetSeparator
 from espnet2.enh.separator.ineube_separator import iNeuBe
@@ -94,6 +96,7 @@ separator_choices = ClassChoices(
         dpcl=DPCLSeparator,
         dpcl_e2e=DPCLE2ESeparator,
         dprnn=DPRNNSeparator,
+        dprnn_eda=DPRNNEDASeparator,
         dptnet=DPTNetSeparator,
         fasnet=FaSNetSeparator,
         rnn=RNNSeparator,
@@ -105,6 +108,7 @@ separator_choices = ClassChoices(
         tcn_nomask=TCNSeparatorNomask,
         ineube=iNeuBe,
         tfgridnet=TFGridNet,
+        asenet=ASENet,
     ),
     type_check=AbsSeparator,
     default="rnn",

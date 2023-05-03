@@ -13,6 +13,8 @@ train_set="tr_${min_or_max}_${sample_rate}"
 valid_set="cv_${min_or_max}_${sample_rate}"
 test_sets="tt_${min_or_max}_${sample_rate} "
 
+config=./conf/tuning/train_enh_dprnn_tasnet.yaml
+
 ./enh.sh \
     --train_set "${train_set}" \
     --valid_set "${valid_set}" \
@@ -21,5 +23,5 @@ test_sets="tt_${min_or_max}_${sample_rate} "
     --lang en \
     --ngpu 1 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
-    --enh_config conf/tuning/train_enh_dprnn_tasnet.yaml \
+    --enh_config "${config}" \
     "$@"

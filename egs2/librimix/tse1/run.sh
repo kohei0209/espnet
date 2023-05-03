@@ -14,6 +14,8 @@ train_set="train"
 valid_set="dev"
 test_sets="test "
 
+config=./conf/tuning/train_enh_tse_asenet.yaml
+
 ./enh.sh \
     --is_tse_task true \
     --train_set "${train_set}" \
@@ -24,5 +26,5 @@ test_sets="test "
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
     --lang en \
     --ngpu 1 \
-    --enh_config ./conf/tuning/train_enh_tse_asenet.yaml \
+    --enh_config "${config}" \
     "$@"

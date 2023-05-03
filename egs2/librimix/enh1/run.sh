@@ -13,6 +13,11 @@ train_set="train"
 valid_set="dev"
 test_sets="test "
 
+# config=./conf/tuning/train_enh_dprnn_tasnet.yaml
+# config=./conf/tuning/train_enh_dprnn_eda_tasnet.yaml
+# config=./conf/tuning/train_enh_asenet.yaml
+config=./conf/tuning/train_enh_asenet_large.yaml
+
 ./enh.sh \
     --use_noise_ref true \
     --train_set "${train_set}" \
@@ -22,6 +27,6 @@ test_sets="test "
     --audio_format wav \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
     --lang en \
-    --ngpu 4 \
-    --enh_config ./conf/train.yaml \
+    --ngpu 1 \
+    --enh_config "${config}" \
     "$@"

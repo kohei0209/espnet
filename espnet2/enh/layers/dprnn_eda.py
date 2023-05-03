@@ -71,7 +71,7 @@ class SingleRNN(nn.Module):
 
 
 # dual-path RNN
-class DPRNN_EDA(nn.Module):
+class DPRNN(nn.Module):
     """Deep dual-path RNN with encoder-decoder-based attractor.
 
     args:
@@ -343,7 +343,7 @@ class SequenceAggregation(nn.Module):
     ):
         super(SequenceAggregation, self).__init__()
         self.path1 = nn.Sequential(
-            nn.Linear(segment_size, r*hidden_size),
+            nn.Linear(hidden_size, r*hidden_size),
             nn.Tanh(),
             nn.Linear(r*hidden_size, r),
             nn.Softmax(dim=-1),
@@ -385,22 +385,25 @@ class EncoderDecoderAttractor(nn.Module):
         output = input
         output = output[..., torch.randperm(C), :]  # shuffle chunk order
         _, state = self.lstm_encoder(output)
+        last_state = (state[0][..., [-1], :], state[1][..., [-1], :])
+        zero_input = input.new_zeros((batch_size, 1, H))
         outputs, existence_probabilities = [], []
         # estimate the number of speakers (inference)
         if num_spks is None:
+            assert batch_size == 1, "We don't support batched computation in inference"
             for j in range(100):
-                output, state = self.lstm_decoder(torch.zeros_like(input), state)
+                output, state = self.lstm_decoder(zero_input, last_state)
                 existence_probability = self.attractor_existence_estimator(output)
                 existence_probabilities.append(existence_probability)
-                if existence_probability > 0.5:
-                    outputs.append(output)
+                if existence_probability.mean() > 0.5:
+                    outputs.append(output[..., 0, :])
                 else:
                     break
         # number of speakers is given (training)
         else:
             for j in range(num_spks + 1):
-                output, state = self.lstm_decoder(torch.zeros_like(input), state)
-                outputs.append(output)
+                output, state = self.lstm_decoder(zero_input, last_state)
+                outputs.append(output[..., 0, :])
                 existence_probability = self.attractor_existence_estimator(output)
                 existence_probabilities.append(existence_probability)
 

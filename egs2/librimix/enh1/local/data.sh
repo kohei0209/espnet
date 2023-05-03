@@ -30,7 +30,7 @@ min_or_max=max
 sample_rate=16k
 num_spk=2
 
-stage=0
+stage=1
 stop_stage=100
 
 . utils/parse_options.sh
@@ -61,7 +61,7 @@ fi
 cdir=$PWD
 
 
-git clone https://github.com/JorisCos/LibriMix ./data/LibriMix
+# git clone https://github.com/JorisCos/LibriMix ./data/LibriMix
 
 if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
     log "stage 0: Downloading WHAM! noise data to '${cdir}/data/wham_noise'"

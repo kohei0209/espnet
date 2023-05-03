@@ -1,19 +1,15 @@
 optim: adam
+init: xavier_uniform
 max_epoch: 100
 batch_type: folded
-batch_size: 32
+batch_size:  32
 iterator_type: chunk
-chunk_length: 64000
-# exclude keys "enroll_ref", "enroll_ref1", "enroll_ref2", ...
-# from the length consistency check in ChunkIterFactory
-chunk_excluded_key_prefixes:
-- "enroll_ref"
+chunk_length: 32000
 num_workers: 8
 optim_conf:
-    lr: 1.0e-04
+    lr: 2.0e-04
     eps: 1.0e-08
     weight_decay: 0
-unused_parameters: true
 patience: 10
 accum_grad: 1
 grad_clip: 5.0
@@ -34,14 +30,6 @@ scheduler_conf:
     factor: 0.7
     patience: 3
 
-model_conf:
-    share_encoder: true
-
-train_spk2enroll: data/train-100/spk2enroll.json
-enroll_segment: 64000
-load_spk_embedding: false
-load_all_speakers: false
-
 encoder: stft
 encoder_conf:
     n_fft: 512
@@ -50,10 +38,11 @@ decoder: stft
 decoder_conf:
     n_fft: 512
     hop_length: 128
-extractor: asenet
-extractor_conf:
+separator: asenet
+separator_conf:
+    num_spk: 2
     separator_hidden_dim: 512
-    separator_num_layers: 1
+    separator_num_layers: 2
     maskestimator_hidden_dim: 512
     maskestimator_num_layers: 2
     attention_dim: 200
@@ -68,10 +57,11 @@ criterions:
   - name: si_snr
     conf:
       eps: 1.0e-7
-    wrapper: fixed_order
+    wrapper: pit
     wrapper_conf:
       weight: 1.0
+      independent_perm: True
 
 use_wandb: true
 wandb_project: universal_speech_enhancement
-wandb_name: asenet_tse_trial_bs32
+wandb_name: asenet_large_sep_trial_bs32

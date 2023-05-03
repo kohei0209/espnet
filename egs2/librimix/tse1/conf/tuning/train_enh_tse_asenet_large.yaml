@@ -10,7 +10,7 @@ chunk_excluded_key_prefixes:
 - "enroll_ref"
 num_workers: 8
 optim_conf:
-    lr: 1.0e-04
+    lr: 2.0e-04
     eps: 1.0e-08
     weight_decay: 0
 unused_parameters: true
@@ -53,7 +53,7 @@ decoder_conf:
 extractor: asenet
 extractor_conf:
     separator_hidden_dim: 512
-    separator_num_layers: 1
+    separator_num_layers: 2
     maskestimator_hidden_dim: 512
     maskestimator_num_layers: 2
     attention_dim: 200
@@ -74,4 +74,4 @@ criterions:
 
 use_wandb: true
 wandb_project: universal_speech_enhancement
-wandb_name: asenet_tse_trial_bs32
+wandb_name: asenet_large_tse_trial_bs32

@@ -6,13 +6,13 @@ from packaging.version import parse as V
 from torch_complex.tensor import ComplexTensor
 
 from espnet2.enh.layers.complex_utils import is_complex
-from espnet2.enh.layers.dprnn_eda import DPRNN,SequenceAggregation, EncoderDecoderAttractor, merge_feature, split_feature,
+from espnet2.enh.layers.dprnn_eda import DPRNN,SequenceAggregation, EncoderDecoderAttractor, merge_feature, split_feature
 from espnet2.enh.separator.abs_separator import AbsSeparator
 
 is_torch_1_9_plus = V(torch.__version__) >= V("1.9.0")
 
 
-class DPRNNSeparator(AbsSeparator):
+class DPRNNEDASeparator(AbsSeparator):
     def __init__(
         self,
         input_dim: int,
@@ -61,10 +61,10 @@ class DPRNNSeparator(AbsSeparator):
 
         self.sequence_aggregation = SequenceAggregation(
             segment_size=segment_size,
-            hidden_size=hidden_size,
+            hidden_size=input_dim,
         )
 
-        self.eda = EncoderDecoderAttractor(hidden_size)
+        self.eda = EncoderDecoderAttractor(input_dim)
 
         if nonlinear not in ("sigmoid", "relu", "tanh"):
             raise ValueError("Not supporting nonlinear={}".format(nonlinear))
@@ -111,18 +111,22 @@ class DPRNNSeparator(AbsSeparator):
         feature = feature.transpose(1, 2)  # B, N, T
         segmented, rest = split_feature(
             feature, segment_size=self.segment_size
-        )  # B, N, L, K
+        )  # B, N, L, K: batch, hidden_dim, segment_len, num_segments
 
         # dual-path block
         processed = self.dprnn(segmented)  # B, N, L, K
+        # reshape
+        processed = processed.permute(0, 3, 2, 1)
         # sequence aggregation
         aggregated_sequence = self.sequence_aggregation(processed)
         # encoder-decoder-attractor
-        attractors, probabilities = self.eda(aggregated_sequence)
+        attractors, probabilities = self.eda(aggregated_sequence, num_spks=2)
         # multiply attractor
-        _, N, L, K = processed.shape
-        processed = processed[..., None, :, :] * attractors[..., None, None] # [B, J, N, L, K]
-        prccessed = processed.reshape(B, -1, L, K)
+        B, K, L, N = processed.shape
+        processed = processed[..., None, :, :, :] * attractors[..., :-1, None, None, :] # [B, J, N, L, K]
+        # reshape again
+        processed = processed.permute(0, 1, 4, 3, 2)
+        processed = processed.reshape(B, -1, L, K)
         # overlap-add
         processed = merge_feature(processed, rest)  # B, N*num_spk, T
 
