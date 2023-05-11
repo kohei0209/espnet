@@ -150,10 +150,10 @@ class ChunkIterFactory(AbsIterFactory):
             # Select chunk length
             chunk_lengths = [lg for lg in self.chunk_lengths if lg < L]
             if len(chunk_lengths) == 0:
-                logging.warning(
-                    f"The length of '{id_}' is {L}, but it is shorter than "
-                    f"any candidates of chunk-length: {self.chunk_lengths}"
-                )
+                # logging.warning(
+                #     f"The length of '{id_}' is {L}, but it is shorter than "
+                #     f"any candidates of chunk-length: {self.chunk_lengths}"
+                # )
                 continue
 
             W = int(state.choice(chunk_lengths, 1))

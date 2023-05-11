@@ -1,14 +1,14 @@
 optim: adam
 max_epoch: 400
 batch_type: folded
-batch_size: 4
+batch_size: 8
 iterator_type: chunk
 chunk_length: 24000
 # exclude keys "enroll_ref", "enroll_ref1", "enroll_ref2", ...
 # from the length consistency check in ChunkIterFactory
 chunk_excluded_key_prefixes:
 - "enroll_ref"
-num_workers: 4
+num_workers: 8
 optim_conf:
     lr: 1.0e-03
     eps: 1.0e-08
@@ -22,7 +22,7 @@ val_scheduler_criterion:
 - loss
 best_model_criterion:
 -   - valid
-    - si_snr
+    - snr
     - max
 -   - valid
     - loss
@@ -81,3 +81,7 @@ criterions:
     wrapper: fixed_order
     wrapper_conf:
       weight: 1.0
+
+use_wandb: true
+wandb_project: universal_speech_enhancement
+wandb_name: tdspkbeam_tse_8k

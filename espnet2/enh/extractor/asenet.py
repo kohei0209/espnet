@@ -104,6 +104,19 @@ class ASENet(AbsExtractor, AbsSeparator):
             nn.Sigmoid(),
         )
 
+        self.ls = nn.LSTM(
+            input_dim,
+            separator_hidden_dim,
+            num_layers=3,
+            dropout=dropout_p,
+            bidirectional=True,
+        )
+        self.l = nn.ModuleList([
+            nn.Linear(separator_hidden_dim*2, input_dim),
+            nn.Linear(separator_hidden_dim*2, input_dim),
+        ])
+        self.s = nn.Sigmoid()
+
 
     def forward(
         self,
@@ -143,16 +156,14 @@ class ASENet(AbsExtractor, AbsSeparator):
         Z2 = self.separator_linear2(feature)
         Z = torch.stack((Z1, Z2), dim=1) # [B, I, T, F]
 
-        # attention part
-        s_v = self.mlp1(Z) # [B, I, T, F]
-        s_v2 = self.mlp2(Z).mean(dim=-2, keepdim=True) # [B, I, 1, F]
-
-        # if 
+        # if behaving as TSE
         if is_tse:
-            # aux_batch = self.enc(input_aux, ilens_aux)[0]  # [B, S, T, F]
-            # aux_feature = aux_batch.transpose(1, 2) # [B, T, F]
             aux_feature = abs(input_aux)
             s_aux = self.mlp_aux(aux_feature).mean(dim=-2, keepdim=True) # [B, S, 1, F]
+
+            # attention part
+            s_v = self.mlp1(Z) # [B, I, T, F]
+            s_v2 = self.mlp2(Z).mean(dim=-2, keepdim=True) # [B, I, 1, F]
 
             # e: [B, S, I, T, F], a: [B, S, I, T, 1]
             e1 = self.W_v(s_v)
@@ -161,7 +172,7 @@ class ASENet(AbsExtractor, AbsSeparator):
             e = e1[..., None, :, :, :] + e2[..., None, :, :, :] + e3[..., None, None, :]
             # e = self.W_v(s_v)[..., None, :, :, :] + self.W_iv(s_v2)[..., None, :, :, :] + self.W_aux(s_aux)[..., None, :, :]
             e = self.w(self.attention_activation(e))
-            a = self.softmax(e/self.alpha)
+            a = self.softmax(e*self.alpha)
 
             others = {"enroll_emb{}".format(suffix_tag): s_aux.detach(),}
         else:
@@ -178,6 +189,18 @@ class ASENet(AbsExtractor, AbsSeparator):
         masks, _ = self.mask_estimator_lstm(z_att) # [B*S, T, F]
         masks = self.mask_estimator_output(masks)
         masks = masks.reshape(B, S, T, -1).unbind(dim=-3)
+
+        '''
+        B, S, T, F = Z.shape
+        masks, _ = self.mask_estimator_lstm(Z.reshape(-1, T, F))
+        masks = self.mask_estimator_output(masks)
+        masks = masks.reshape(B, S, T, -1).unbind(dim=-3)
+        '''
+        '''
+        feature, _ = self.ls(feature)
+        masks = [l(feature) for l in self.l]
+        masks = [self.s(mask) for mask in masks]
+        '''
 
         # masking
         if self.predict_noise:

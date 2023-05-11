@@ -16,7 +16,7 @@ test_sets="test "
 # config=./conf/tuning/train_enh_dprnn_tasnet.yaml
 # config=./conf/tuning/train_enh_dprnn_eda_tasnet.yaml
 # config=./conf/tuning/train_enh_asenet.yaml
-config=./conf/tuning/train_enh_asenet_large.yaml
+config=./conf/tuning/train_enh_asenet_simple.yaml
 
 ./enh.sh \
     --use_noise_ref true \

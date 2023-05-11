@@ -3,7 +3,7 @@ max_epoch: 100
 batch_type: folded
 batch_size: 32
 iterator_type: chunk
-chunk_length: 64000
+chunk_length: 32000
 # exclude keys "enroll_ref", "enroll_ref1", "enroll_ref2", ...
 # from the length consistency check in ChunkIterFactory
 chunk_excluded_key_prefixes:
@@ -38,7 +38,7 @@ model_conf:
     share_encoder: true
 
 train_spk2enroll: data/train-100/spk2enroll.json
-enroll_segment: 64000
+enroll_segment: 32000
 load_spk_embedding: false
 load_all_speakers: false
 
@@ -65,7 +65,7 @@ extractor_conf:
 # The default `weight` for each sub-loss is 1.0
 criterions:
   # The first criterion
-  - name: si_snr
+  - name: snr
     conf:
       eps: 1.0e-7
     wrapper: fixed_order
@@ -74,4 +74,4 @@ criterions:
 
 use_wandb: true
 wandb_project: universal_speech_enhancement
-wandb_name: asenet_tse_trial_bs32
+wandb_name: asenet_tse_softmaxTemp2_2outputs_bs32

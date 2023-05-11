@@ -27,10 +27,10 @@ wsj_full_wav=$3
 wsj_2mix_wav=$4
 
 
-if ! which matlab >/dev/null 2>&1; then
-    echo "matlab not found."
-    exit 1
-fi
+# if ! which matlab >/dev/null 2>&1; then
+#     echo "matlab not found."
+#     exit 1
+# fi
 
 echo "Downloading WSJ0_mixture scripts."
 

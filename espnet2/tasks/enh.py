@@ -35,6 +35,8 @@ from espnet2.enh.loss.criterions.time_domain import (
     TimeDomainL1,
     TimeDomainMSE,
 )
+from espnet2.enh.extractor.asenet import ASENet
+from espnet2.enh.extractor.td_speakerbeam_hybrid_extractor import TDSpeakerBeamExtractorWithAttention
 from espnet2.enh.loss.wrappers.abs_wrapper import AbsLossWrapper
 from espnet2.enh.loss.wrappers.dpcl_solver import DPCLSolver
 from espnet2.enh.loss.wrappers.fixed_order import FixedOrderSolver
@@ -51,7 +53,6 @@ from espnet2.enh.separator.dpcl_e2e_separator import DPCLE2ESeparator
 from espnet2.enh.separator.dpcl_separator import DPCLSeparator
 from espnet2.enh.separator.dprnn_separator import DPRNNSeparator
 from espnet2.enh.separator.dprnn_eda_separator import DPRNNEDASeparator
-from espnet2.enh.extractor.asenet import ASENet
 from espnet2.enh.separator.dptnet_separator import DPTNetSeparator
 from espnet2.enh.separator.fasnet_separator import FaSNetSeparator
 from espnet2.enh.separator.ineube_separator import iNeuBe
@@ -109,6 +110,7 @@ separator_choices = ClassChoices(
         ineube=iNeuBe,
         tfgridnet=TFGridNet,
         asenet=ASENet,
+        td_speakerbeam_with_attention=TDSpeakerBeamExtractorWithAttention,
     ),
     type_check=AbsSeparator,
     default="rnn",

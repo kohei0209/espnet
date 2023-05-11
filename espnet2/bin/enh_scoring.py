@@ -10,6 +10,8 @@ import numpy as np
 import torch
 from mir_eval.separation import bss_eval_sources
 from pystoi import stoi
+from pesq import pesq
+
 from typeguard import check_argument_types
 
 from espnet2.enh.loss.criterions.time_domain import SISNRLoss
@@ -151,6 +153,9 @@ def scoring(
                 estoi_score = stoi(
                     ref[i], inf[int(perm[i])], fs_sig=sample_rate, extended=True
                 )
+                if sample_rate == 16000:
+                    wbpesq_score = pesq(ref[i], inf[int(perm[i])], mode="wb")
+                nbpesq_score = pesq(ref[i], inf[int(perm[i])], mode="nb")
                 si_snr_score = -float(
                     si_snr_loss(
                         torch.from_numpy(ref[i][None, ...]),
@@ -159,6 +164,9 @@ def scoring(
                 )
                 writer[f"STOI_spk{i + 1}"][key] = str(stoi_score * 100)  # in percentage
                 writer[f"ESTOI_spk{i + 1}"][key] = str(estoi_score * 100)
+                if sample_rate == 16000:
+                    writer[f"WBPESQ_spk{i + 1}"][key] = str(wbpesq_score)  # in percentage
+                writer[f"NBPESQ_spk{i + 1}"][key] = str(nbpesq_score)
                 writer[f"SI_SNR_spk{i + 1}"][key] = str(si_snr_score)
                 writer[f"SDR_spk{i + 1}"][key] = str(sdr[i])
                 writer[f"SAR_spk{i + 1}"][key] = str(sar[i])

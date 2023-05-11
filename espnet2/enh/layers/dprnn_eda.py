@@ -12,6 +12,8 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 
+from espnet2.enh.layers.adapt_layers import make_adapt_layer
+
 EPS = torch.finfo(torch.get_default_dtype()).eps
 
 
@@ -334,10 +336,177 @@ class DPRNN_TAC(nn.Module):
         return output
 
 
+# dual-path RNN
+class DPRNN_EDA_Informed(nn.Module):
+    """Deep dual-path RNN with encoder-decoder-based attractor.
+
+    args:
+        rnn_type: string, select from 'RNN', 'LSTM' and 'GRU'.
+        input_size: int, dimension of the input feature. The input should have shape
+                    (batch, seq_len, input_size).
+        hidden_size: int, dimension of the hidden state.
+        output_size: int, dimension of the output size.
+        dropout: float, dropout ratio. Default is 0.
+        num_layers: int, number of stacked RNN layers. Default is 1.
+        bidirectional: bool, whether the RNN layers are bidirectional. Default is True.
+    """
+
+    def __init__(
+        self,
+        rnn_type,
+        input_size,
+        hidden_size,
+        output_size,
+        segment_size,
+        dropout=0,
+        num_layers=1,
+        bidirectional=True,
+        i_eda_layer=1,
+        i_adapt_layer=1,
+        adapt_layer_type: str = "mul",
+        adapt_enroll_dim: int = 64,
+    ):
+        super().__init__()
+
+        self.input_size = input_size
+        self.output_size = output_size
+        self.hidden_size = hidden_size
+
+        # dual-path RNN
+        self.row_rnn = nn.ModuleList([])
+        self.col_rnn = nn.ModuleList([])
+        self.row_norm = nn.ModuleList([])
+        self.col_norm = nn.ModuleList([])
+        for i in range(num_layers):
+            self.row_rnn.append(
+                SingleRNN(
+                    rnn_type, input_size, hidden_size, dropout, bidirectional=True
+                )
+            )  # intra-segment RNN is always noncausal
+            self.col_rnn.append(
+                SingleRNN(
+                    rnn_type,
+                    input_size,
+                    hidden_size,
+                    dropout,
+                    bidirectional=bidirectional,
+                )
+            )
+            self.row_norm.append(nn.GroupNorm(1, input_size, eps=1e-8))
+            # default is to use noncausal LayerNorm for inter-chunk RNN.
+            # For causal setting change it to causal normalization accordingly.
+            self.col_norm.append(nn.GroupNorm(1, input_size, eps=1e-8))
+        self.output = nn.Sequential(nn.PReLU(), nn.Conv2d(input_size, output_size, 1))
+        self.output2 = nn.Sequential(nn.PReLU(), nn.Conv2d(input_size, output_size*2, 1))
+
+        # eda related params
+        self.i_eda_layer = i_eda_layer
+        if i_eda_layer is not None:
+            self.sequence_aggregation = SequenceAggregation(input_size)
+            self.eda = EncoderDecoderAttractor(input_size)
+        # tse related params
+        self.i_adapt_layer = i_adapt_layer
+        self.adapt_enroll_dim = adapt_enroll_dim
+        self.adapt_layer_type = adapt_layer_type
+        if adapt_layer_type == "attn":
+            adapt_layer_kwargs={"is_dualpath_process": True, "attention_dim": 200,}
+        else:
+            adapt_layer_kwargs = {}
+        self.adapt_layer = make_adapt_layer(
+            adapt_layer_type,
+            indim=input_size,
+            enrolldim=adapt_enroll_dim,
+            ninputs=1,
+            adapt_layer_kwargs=adapt_layer_kwargs,
+        )
+
+    def forward(self, input, enroll_emb, num_spk=None):
+        # input shape: batch, N, dim1, dim2
+        # apply RNN on dim1 first and then dim2
+        # output shape: B, output_size, dim1, dim2
+        # input = input.to(device)
+        is_tse = enroll_emb is not None
+        batch_size, hidden_dim, dim1, dim2 = input.shape # dim1: segment_size, dim2: num_segments
+        orig_batch_size = batch_size
+        output = input
+        for i in range(len(self.row_rnn)):
+            row_input = (
+                output.permute(0, 3, 2, 1)
+                .contiguous()
+                .view(batch_size * dim2, dim1, -1)
+            )  # B*dim2, dim1, N
+            row_output, _ = self.row_rnn[i](row_input)  # B*dim2, dim1, H
+            row_output = (
+                row_output.view(batch_size, dim2, dim1, -1)
+                .permute(0, 3, 2, 1)
+                .contiguous()
+            )  # B, N, dim1, dim2
+            row_output = self.row_norm[i](row_output)
+            output = output + row_output
+
+            col_input = (
+                output.permute(0, 2, 3, 1)
+                .contiguous()
+                .view(batch_size * dim1, dim2, -1)
+            )  # B*dim1, dim2, N
+            col_output, _ = self.col_rnn[i](col_input)  # B*dim1, dim2, H
+            col_output = (
+                col_output.view(batch_size, dim1, dim2, -1)
+                .permute(0, 3, 1, 2)
+                .contiguous()
+            )  # B, N, dim1, dim2
+            col_output = self.col_norm[i](col_output)
+            output = output + col_output
+
+            # compute attractor
+            if i == self.i_eda_layer:
+                assert num_spk is not None, f"num_spk must be specified if using the EDA module during training"
+                # sequence aggregation
+                aggregated_sequence = self.sequence_aggregation(output.transpose(-1, -3))
+                # encoder-decoder-attractor
+                attractors, probabilities = self.eda(aggregated_sequence, num_spk=num_spk)
+                # multiply attractor
+                output = output[..., None, :, :, :] * attractors[..., :-1, :, None, None] # [B, J, N, L, K]
+                # reshape again
+                output = output.reshape(-1, hidden_dim, dim1, dim2)
+                batch_size = output.shape[0]
+            else:
+                probabilities = None
+            # for TSE
+            if i == self.i_adapt_layer:
+                if self.adapt_layer_type != "attn":
+                    assert num_spk == 1
+                    assert is_tse
+                    output = output.reshape(-1, hidden_dim, dim1, dim2)
+                    if enroll_emb.ndim == 2:
+                        enroll_emb = enroll_emb[..., None]
+                    output = self.adapt_layer(output, enroll_emb)
+                else:
+                    if self.i_eda_layer is None:
+                        output = self.output2(output)
+                    output = output.reshape(orig_batch_size, num_spk, hidden_dim, dim1, dim2)
+                    output = output.permute(0, 3, 4, 1, 2)
+                    assert num_spk > 1
+                    output = self.adapt_layer(output, enroll_emb)
+                    if not is_tse:
+                        output = output.permute(0, 3, 4, 1, 2)
+                        output = output.reshape(orig_batch_size*num_spk, hidden_dim, dim1, dim2)
+                    else:
+                        output = output.permute(0, 3, 1, 2)
+                    batch_size = output.shape[0]
+            # only separation without EDA and without TSE
+            # if self.i_eda_layer is None and not is_tse and i == self.i_adapt_layer:
+            #     output = self.output2(output)
+            #     output = output.reshape(-1, hidden_dim, dim1, dim2)
+            #     batch_size = output.shape[0]
+        output = self.output(output)
+        output = output.reshape(orig_batch_size, -1, dim1, dim2) # [B*J, N, L, K]->[B, J*N, L, K], J: num_spks
+        return output, probabilities
+
+
 class SequenceAggregation(nn.Module):
     def __init__(
         self,
-        segment_size,
         hidden_size,
         r=4,
     ):
@@ -380,7 +549,7 @@ class EncoderDecoderAttractor(nn.Module):
             nn.Linear(hidden_size, 1), nn.Sigmoid()
         )
 
-    def forward(self, input, num_spks=None):
+    def forward(self, input, num_spk=None):
         batch_size, C, H = input.shape
         output = input
         output = output[..., torch.randperm(C), :]  # shuffle chunk order
@@ -389,7 +558,7 @@ class EncoderDecoderAttractor(nn.Module):
         zero_input = input.new_zeros((batch_size, 1, H))
         outputs, existence_probabilities = [], []
         # estimate the number of speakers (inference)
-        if num_spks is None:
+        if num_spk is None:
             assert batch_size == 1, "We don't support batched computation in inference"
             for j in range(100):
                 output, state = self.lstm_decoder(zero_input, last_state)
@@ -401,7 +570,7 @@ class EncoderDecoderAttractor(nn.Module):
                     break
         # number of speakers is given (training)
         else:
-            for j in range(num_spks + 1):
+            for j in range(num_spk + 1):
                 output, state = self.lstm_decoder(zero_input, last_state)
                 outputs.append(output[..., 0, :])
                 existence_probability = self.attractor_existence_estimator(output)

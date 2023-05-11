@@ -66,6 +66,7 @@ inf_num=    # Number of inferences output by the model
 noise_type_num=1    # Number of noise types in the input audio
 dereverb_ref_num=1  # Number of reference signals for deverberation
 is_tse_task=false   # Whether perform the target speaker extraction task or normal speech enhancement/separation tasks
+is_tse_and_ss_task=false   # Whether perform the target speaker extraction task or normal speech enhancement/separation tasks
 
 # Training data related
 use_dereverb_ref=false
@@ -569,6 +570,8 @@ if ! "${skip_train}"; then
 
         if $is_tse_task; then
             train_module=espnet2.bin.enh_tse_train
+        elif $is_tse_and_ss_task; then
+            train_module=espnet2.bin.enh_tse_ss_train
         else
             train_module=espnet2.bin.enh_train
         fi
@@ -629,7 +632,7 @@ if ! "${skip_train}"; then
             _fold_length_param+="--fold_length ${_fold_length} "
 
             # for target-speaker extraction
-            if $is_tse_task; then
+            if $is_tse_task || $is_tse_and_ss_task; then
                 _train_data_param+="--train_data_path_and_name_and_type ${_enh_train_dir}/enroll_spk${spk}.scp,enroll_ref${spk},text "
                 _train_shape_param+="--train_shape_file ${enh_stats_dir}/train/enroll_ref${spk}_shape "
                 _fold_length_param+="--fold_length ${_fold_length} "
@@ -641,7 +644,7 @@ if ! "${skip_train}"; then
             _valid_shape_param+="--valid_shape_file ${enh_stats_dir}/valid/speech_ref${spk}_shape "
 
             # for target-speaker extraction
-            if $is_tse_task; then
+            if $is_tse_task || $is_tse_and_ss_task; then
                 _valid_data_param+="--valid_data_path_and_name_and_type ${_enh_valid_dir}/enroll_spk${spk}.scp,enroll_ref${spk},text "
                 _valid_shape_param+="--valid_shape_file ${enh_stats_dir}/valid/enroll_ref${spk}_shape "
             fi
@@ -681,6 +684,8 @@ if ! "${skip_train}"; then
         fi
         if $is_tse_task; then
             train_module=espnet2.bin.enh_tse_train
+        elif $is_tse_and_ss_task; then
+            train_module=espnet2.bin.enh_tse_ss_train
         else
             train_module=espnet2.bin.enh_train
         fi
