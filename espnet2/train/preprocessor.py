@@ -1273,7 +1273,10 @@ class TSEPreprocessor(EnhPreprocessor):
             assert len(ref_names) == len(aux_names), (len(ref_names), len(aux_names))
             if not self.load_all_speakers:
                 # only load one target-speaker data
-                spk = np.random.randint(0, num_spk)
+                spk = np.random.randint(0, num_spk-1)
+                while hasattr(self, "dummy_label") and data[f"enroll_ref{spk+1}"] == f"*{self.dummy_label} {self.dummy_label}":
+                    spk = np.random.randint(0, num_spk-1)
+
                 for i, name in enumerate(ref_names):
                     if i == 0:
                         data[name] = data[ref_names[spk]]
@@ -1292,6 +1295,9 @@ class TSEPreprocessor(EnhPreprocessor):
                     # normal format in `enroll_spk?.scp`:
                     # MIXTURE_UID /path/to/enrollment_or_embedding
                     aux_audio = data[name]
+                elif hasattr(self, "dummy_label") and data[name] == f"*{self.dummy_label} {self.dummy_label}":
+                    data[name] = np.zeros(1, dtype=data["speech_mix"].dtype)
+                    continue
                 else:
                     # a special format in `enroll_spk?.scp`:
                     # MIXTURE_UID *UID SPEAKER_ID
@@ -1311,6 +1317,9 @@ class TSEPreprocessor(EnhPreprocessor):
         else:
             for name in aux_names:
                 if data[name].startswith("*"):
+                    # in case of collecting stats for training data
+                    data[name] = np.zeros(1, dtype=data["speech_mix"].dtype)
+                elif hasattr(self, "dummy_label") and self.dummy_label == data[name]:
                     # in case of collecting stats for training data
                     data[name] = np.zeros(1, dtype=data["speech_mix"].dtype)
                 else:
@@ -1335,6 +1344,416 @@ class TSEPreprocessor(EnhPreprocessor):
         data = self._speech_process(uid, data)
         return data
 
+
+class EnhTsePreprocessor(TSEPreprocessor):
+    """Preprocessor for unified speech enhancement/separation/extraction."""
+
+    def __init__(
+        self,
+        train: bool,
+        dummy_label: str = "dummy",
+        speech_segment: int = None,
+        # inherited from TSEPreprocessor
+        train_spk2enroll: str = None,
+        enroll_segment: int = None,
+        load_spk_embedding: bool = False,
+        load_all_speakers: bool = False,
+        # inherited from EnhPreprocessor
+        rir_scp: str = None,
+        rir_apply_prob: float = 1.0,
+        noise_scp: str = None,
+        noise_apply_prob: float = 1.0,
+        noise_db_range: str = "3_10",
+        short_noise_thres: float = 0.5,
+        speech_volume_normalize: float = None,
+        speech_name: str = "speech_mix",
+        speech_ref_name_prefix: str = "speech_ref",
+        noise_ref_name_prefix: str = "noise_ref",
+        dereverb_ref_name_prefix: str = "dereverb_ref",
+        use_reverberant_ref: bool = False,
+        num_spk: int = 1,
+        num_noise_type: int = 1,
+        sample_rate: int = 8000,
+        force_single_channel: bool = False,
+    ):
+        super().__init__(
+            train,
+            train_spk2enroll=train_spk2enroll,
+            enroll_segment=enroll_segment,
+            load_spk_embedding=load_spk_embedding,
+            load_all_speakers=load_all_speakers,
+            rir_scp=rir_scp,
+            rir_apply_prob=rir_apply_prob,
+            noise_scp=noise_scp,
+            noise_apply_prob=noise_apply_prob,
+            noise_db_range=noise_db_range,
+            short_noise_thres=short_noise_thres,
+            speech_volume_normalize=speech_volume_normalize,
+            speech_name=speech_name,
+            speech_ref_name_prefix=speech_ref_name_prefix,
+            noise_ref_name_prefix=noise_ref_name_prefix,
+            dereverb_ref_name_prefix=dereverb_ref_name_prefix,
+            use_reverberant_ref=use_reverberant_ref,
+            num_spk=num_spk,
+            num_noise_type=num_noise_type,
+            sample_rate=sample_rate,
+            force_single_channel=force_single_channel,
+        )
+        # This defines the dummy label for handling the variable number of speakers
+        self.dummy_label = dummy_label
+        self.speech_segment = speech_segment
+
+    def _speech_process(
+        self, uid: str, data: Dict[str, Union[str, np.ndarray]]
+    ) -> Dict[str, Union[str, np.ndarray]]:
+        assert check_argument_types()
+
+        to_remove, ref_names = [], []
+        for k, v in data.items():
+            if re.match(r"speech_ref\d+", k):
+                if v == self.dummy_label:
+                    # remove dummy references
+                    to_remove.append(k)
+                    # to_remove.append(k.replace("speech_ref", "enroll_ref"))
+                else:
+                    ref_names.append(k)
+        for k in to_remove:
+            if k in data:
+                # data.pop(k)
+                data[k] = np.zeros(1)
+
+        # speech segment for sequence-based iterator
+        if self.speech_segment is not None:
+            org_len = data["speech_mix"].shape[-1]
+            if org_len > self.speech_segment:
+                start = np.random.randint(0, org_len - self.speech_segment)
+                stop = start+self.speech_segment
+                data["speech_mix"] = data["speech_mix"][..., start:stop]
+            else:
+                start, stop = 0, None
+        else:
+            start, stop = 0, None
+
+        num_spk = len(ref_names)
+        for spk in range(1, num_spk + 1):
+            name = f"speech_ref{spk}"
+            # make sure the dummy references only exist after the real ones
+            assert name in data, f"dummy reference must appear after the real ones"
+            # Read the speech references
+            data[name] = soundfile.read(data[name], start=start, stop=stop)[0]
+            assert data["speech_mix"].shape[-1] == data[name].shape[-1], (org_len, data["speech_mix"].shape[-1], data[name].shape[-1], start, stop)
+            # data[name] = soundfile.read(data[name])[0]
+        assert check_return_type(data)
+        return data
+
+    def __call__(
+        self, uid: str, data: Dict[str, Union[str, np.ndarray]]
+    ) -> Dict[str, np.ndarray]:
+        assert check_argument_types()
+
+        data = self._speech_process(uid, data)
+        data = super()._speech_process(uid, data)
+        return data
+
+
+'''
+class EnhTextPreprocessor(CommonPreprocessor):
+    """Preprocessor for Speech Enhancement (Enh) task."""
+
+    def __init__(
+        self,
+        train: bool,
+        rir_scp: str = None,
+        rir_apply_prob: float = 1.0,
+        noise_scp: str = None,
+        noise_apply_prob: float = 1.0,
+        noise_db_range: str = "3_10",
+        short_noise_thres: float = 0.5,
+        speech_volume_normalize: float = None,
+        speech_name: str = "speech_mix",
+        speech_ref_name_prefix: str = "speech_ref",
+        noise_ref_name_prefix: str = "noise_ref",
+        dereverb_ref_name_prefix: str = "dereverb_ref",
+        dummy_ref_name_prefix: str = "dummy",
+        use_reverberant_ref: bool = False,
+        num_spk: int = 1,
+        num_noise_type: int = 1,
+        sample_rate: int = 8000,
+        force_single_channel: bool = False,
+    ):
+        super().__init__(
+            train=train,
+            token_type=None,
+            token_list=None,
+            bpemodel=None,
+            text_cleaner=None,
+            g2p_type=None,
+            unk_symbol="<unk>",
+            space_symbol="<space>",
+            non_linguistic_symbols=None,
+            delimiter=None,
+            rir_scp=rir_scp,
+            rir_apply_prob=rir_apply_prob,
+            noise_scp=noise_scp,
+            noise_apply_prob=noise_apply_prob,
+            noise_db_range=noise_db_range,
+            short_noise_thres=short_noise_thres,
+            speech_volume_normalize=speech_volume_normalize,
+            speech_name=speech_name,
+        )
+        self.speech_ref_name_prefix = speech_ref_name_prefix
+        self.noise_ref_name_prefix = noise_ref_name_prefix
+        self.dereverb_ref_name_prefix = dereverb_ref_name_prefix
+        self.dummy_ref_name_prefix = dummy_ref_name_prefix
+        self.use_reverberant_ref = use_reverberant_ref
+        self.num_spk = num_spk
+        self.num_noise_type = num_noise_type
+        self.sample_rate = sample_rate
+        self.force_single_channel = force_single_channel
+
+        if self.speech_volume_normalize is not None:
+            sps = speech_volume_normalize.split("_")
+            if len(sps) == 1:
+                self.volume_low, self.volume_high = float(sps[0])
+            elif len(sps) == 2:
+                self.volume_low, self.volume_high = float(sps[0]), float(sps[1])
+            else:
+                raise ValueError(
+                    "Format error for --speech_volume_normalize: "
+                    f"'{speech_volume_normalize}'"
+                )
+
+    def _ensure_2d(self, signal):
+        if isinstance(signal, tuple):
+            return tuple(self._ensure_2d(sig) for sig in signal)
+        elif isinstance(signal, list):
+            return [self._ensure_2d(sig) for sig in signal]
+        else:
+            # (Nmic, Time)
+            return signal[None, :] if signal.ndim == 1 else signal.T
+
+    def _get_early_signal(self, speech, rir, power):
+        predelay = 50  # milliseconds
+        dt = np.argmax(rir, axis=1).min()
+        et = dt + (predelay * self.sample_rate) // 1000
+        rir_early = rir[:, :et]
+        speech2 = scipy.signal.convolve(speech, rir_early, mode="full")[
+            :, : speech.shape[1]
+        ]
+        # Reverse mean power to the original power
+        power2 = (speech2[detect_non_silence(speech2)] ** 2).mean()
+        speech2 = np.sqrt(power / max(power2, 1e-10)) * speech2
+        return speech2
+
+    def _apply_to_all_signals(self, data_dict, func):
+        data_dict[self.speech_name] = func(data_dict[self.speech_name])
+
+        for n in range(self.num_noise_type):
+            noise_name = self.noise_ref_name_prefix + str(n + 1)
+            if noise_name in data_dict:
+                data_dict[noise_name] = func(data_dict[noise_name])
+
+        for spk in range(self.num_spk):
+            speech_ref_name = self.speech_ref_name_prefix + str(spk + 1)
+            if self.train or speech_ref_name in data_dict:
+                data_dict[speech_ref_name] = func(data_dict[speech_ref_name])
+
+            dereverb_ref_name = self.dereverb_ref_name_prefix + str(spk + 1)
+            if dereverb_ref_name in data_dict:
+                data_dict[dereverb_ref_name] = func(data_dict[dereverb_ref_name])
+
+    def _speech_process(
+        self, data: Dict[str, Union[str, np.ndarray]]
+    ) -> Dict[str, Union[str, np.ndarray]]:
+        assert check_argument_types()
+
+        if self.speech_name not in data:
+            assert check_return_type(data)
+            return data
+
+        # delete dummy part
+        data = {k: v for k, v in data.items() if v != self.dummy_ref_name_prefix}
+        # load audios
+        for n, (key, value) in enumerate(data.items()):
+            # skip if audio is alredy loaded (mixture)
+            if value.dtype == np.ndarray:
+                continue
+            assert value.dtype == str:
+            data[key] = soundfile.read(data[key])[0]
+
+        if self.train:
+            # clean speech signal (Nmic, Time)
+            speech_ref = [
+                self._ensure_2d(data[self.speech_ref_name_prefix + str(i + 1)])
+                for i in range(self.num_spk)
+            ]
+
+            # dereverberated (noisy) signal (Nmic, Time)
+            if "dereverb_ref1" in data:
+                dereverb_speech_ref = [
+                    self._ensure_2d(data[self.dereverb_ref_name_prefix + str(i + 1)])
+                    for i in range(self.num_spk)
+                    if self.dereverb_ref_name_prefix + str(i + 1) in data
+                ]
+                assert len(dereverb_speech_ref) in (1, self.num_spk), len(
+                    dereverb_speech_ref
+                )
+            else:
+                dereverb_speech_ref = None
+
+            # Calc power on non silence region
+            power_ref = [
+                (sref[detect_non_silence(sref)] ** 2).mean() for sref in speech_ref
+            ]
+
+            speech_mix = self._ensure_2d(data[self.speech_name])
+            # 1. Convolve RIR
+            if self.rirs is not None and self.rir_apply_prob >= np.random.random():
+                if self.noise_ref_name_prefix + "1" in data:
+                    noise = data[self.noise_ref_name_prefix + "1"]
+                    np.testing.assert_allclose(
+                        np.squeeze(sum(speech_ref) + noise), np.squeeze(speech_mix)
+                    )
+                else:
+                    np.testing.assert_allclose(
+                        np.squeeze(sum(speech_ref)), np.squeeze(speech_mix)
+                    )
+
+                speech_ref, rir_ref = zip(
+                    *[
+                        self._convolve_rir(sp, power)
+                        for sp, power in zip(speech_ref, power_ref)
+                    ]
+                )
+                if self.force_single_channel:
+                    speech_ref = list(
+                        map(lambda x: x if x.shape[0] == 1 else x[:1], speech_ref)
+                    )
+                    rir_ref = list(
+                        map(lambda x: x if x.shape[0] == 1 else x[:1], rir_ref)
+                    )
+
+                if self.use_reverberant_ref:
+                    for spk in range(self.num_spk):
+                        suffix = str(spk + 1)
+                        speech_ref_name = self.speech_ref_name_prefix + suffix
+                        # (Time, Nmic)
+                        data[speech_ref_name] = speech_ref[spk].T
+
+                        if dereverb_speech_ref is not None:
+                            if spk == 0 or len(dereverb_speech_ref) > 1:
+                                dereverb_name = self.dereverb_ref_name_prefix + suffix
+                                data[dereverb_name] = self._get_early_signal(
+                                    speech_ref[spk], rir_ref[spk], power_ref[spk]
+                                ).T
+                else:
+                    for spk in range(self.num_spk):
+                        suffix = str(spk + 1)
+                        speech_ref_name = self.speech_ref_name_prefix + suffix
+                        # clean speech with early reflections (Time, Nmic)
+                        data[speech_ref_name] = self._get_early_signal(
+                            speech_ref[spk], rir_ref[spk], power_ref[spk]
+                        ).T
+
+                        if dereverb_speech_ref is not None:
+                            if spk == 0 or len(dereverb_speech_ref) > 1:
+                                dereverb_name = self.dereverb_ref_name_prefix + suffix
+                                data[dereverb_name] = data[speech_ref_name]
+
+                if self.noise_ref_name_prefix + "1" in data:
+                    speech_mix = sum(speech_ref) + noise
+                else:
+                    speech_mix = sum(speech_ref)
+
+            # 2. Add Noise
+            if self.noises is not None and self.noise_apply_prob >= np.random.random():
+                if self.noise_ref_name_prefix + "1" in data:
+                    speech_mix -= data[self.noise_ref_name_prefix + "1"]
+                power_mix = (speech_mix[detect_non_silence(speech_mix)] ** 2).mean()
+                speech_mix, noise = self._add_noise(speech_mix, power_mix)
+                if self.force_single_channel:
+                    if speech_mix.shape[0] > 1:
+                        speech_mix = speech_mix[:1]
+                    if noise.shape[0] > 1:
+                        noise = noise[:1]
+
+                for n in range(1, self.num_noise_type):
+                    name = self.noise_ref_name_prefix + str(n + 1)
+                    data.pop(name, None)
+                data[self.noise_ref_name_prefix + "1"] = noise.T
+
+            speech_mix = speech_mix.T
+            data[self.speech_name] = speech_mix
+            ma = np.max(np.abs(speech_mix))
+            if ma > 1.0:
+                self._apply_to_all_signals(data, lambda x: x / ma)
+
+            self._apply_to_all_signals(data, lambda x: x.squeeze())
+
+        if self.force_single_channel:
+            self._apply_to_all_signals(data, lambda x: x if x.ndim == 1 else x[:, 0])
+
+        if self.speech_volume_normalize is not None:
+            if self.train:
+                volume_scale = np.random.uniform(self.volume_low, self.volume_high)
+            else:
+                # use a fixed scale to make it deterministic
+                volume_scale = self.volume_low
+            speech_mix = data[self.speech_name]
+            ma = np.max(np.abs(speech_mix))
+            self._apply_to_all_signals(data, lambda x: x * volume_scale / ma)
+
+        assert check_return_type(data)
+        return data
+
+    def _read_audio_segment(self, path, offset=None, seg_len=None):
+        with soundfile.SoundFile(path) as f:
+            if seg_len is None or f.frames == seg_len:
+                audio = f.read(dtype=np.float32, always_2d=True)
+            elif f.frames < seg_len:
+                if offset is None:
+                    offset = np.random.randint(0, seg_len - f.frames)
+                # audio: (Time, Nmic)
+                audio = f.read(dtype=np.float32, always_2d=True)
+                # Repeat audio
+                audio = np.pad(
+                    audio,
+                    [(offset, seg_len - f.frames - offset), (0, 0)],
+                    mode="wrap",
+                )
+            else:
+                if offset is None:
+                    offset = np.random.randint(0, f.frames - seg_len)
+                f.seek(offset)
+                # audio: (Time, Nmic)
+                audio = f.read(seg_len, dtype=np.float32, always_2d=True)
+            if len(audio) != seg_len:
+                raise RuntimeError(f"Something wrong: {path}")
+        return audio[:, 0], offset
+
+    # def _read_audio_with_dummy(
+    #     self, data: Dict[str, str]
+    # ) -> Dict[str, np.ndarray]:
+    #     new_data = {}
+    #     mix, offset = self._read_audio_segment(data["speech_mix"], seg_len=self.seg_len)
+    #     new_data["speech_mix"] = mix
+    #     for n, (key, value) in enumerate(data.items()):
+    #         if value == "dummy" or key == "speech_mix":
+    #             continue
+    #         new_data[f"speech_ref{n}"] = self._read_audio_segment(
+    #             value, offset=offset, seg_len=self.seg_len
+    #         )[0]
+    #     return new_data
+
+    def __call__(
+        self, uid: str, data: Dict[str, Union[str, np.ndarray]]
+    ) -> Dict[str, np.ndarray]:
+        assert check_argument_types()
+
+        data = self._read_audio_with_dummy(data)
+        data = self._speech_process(data)
+        data = self._text_process(data)
+        return data
 
 
 class TSESSPreprocessor(EnhPreprocessor):
@@ -1504,7 +1923,11 @@ class TSESSPreprocessor(EnhPreprocessor):
         num_spk = len(data)
         new_data = {}
         for n, (key, value) in enumerate(zip(data)):
-            new_data[f"speech_ref{n}"] = soundfile.read(data[key])[0]
+            if value == "dummy":
+                continue
+            new_data[f"speech_ref{n}"] = self._read_audio_segment(
+                key,
+            )
         return new_data
 
     def __call__(
@@ -1516,3 +1939,4 @@ class TSESSPreprocessor(EnhPreprocessor):
         data = super()._speech_process(data)
         data = self._speech_process(uid, data)
         return data
+'''

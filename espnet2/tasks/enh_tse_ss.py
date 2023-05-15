@@ -1,5 +1,7 @@
 import argparse
 from typing import Callable, Collection, Dict, List, Optional, Tuple
+from pathlib import Path
+import logging
 
 import numpy as np
 import torch
@@ -21,11 +23,27 @@ from espnet2.tasks.enh import (
 from espnet2.torch_utils.initialize import initialize
 from espnet2.train.class_choices import ClassChoices
 from espnet2.train.collate_fn import CommonCollateFn
-from espnet2.train.preprocessor import AbsPreprocessor, TSEPreprocessor
+from espnet2.train.preprocessor import AbsPreprocessor, TSEPreprocessor, EnhTsePreprocessor
 from espnet2.train.trainer import Trainer
 from espnet2.utils.get_default_kwargs import get_default_kwargs
 from espnet2.utils.nested_dict_action import NestedDictAction
 from espnet2.utils.types import int_or_none, str2bool, str_or_none
+# added
+from espnet2.train.distributed_utils import (
+    DistributedOption,
+    free_port,
+    get_master_port,
+    get_node_rank,
+    get_num_nodes,
+    resolve_distributed_mode,
+)
+from espnet2.tasks.abs_task import IteratorOptions
+from espnet2.iterators.abs_iter_factory import AbsIterFactory
+from espnet2.iterators.chunk_iter_factory import ChunkIterFactory
+from espnet2.iterators.multiple_iter_factory import MultipleIterFactory
+from espnet2.iterators.sequence_iter_factory import SequenceIterFactory
+from espnet2.train.dataset import DATA_TYPES, AbsDataset, ESPnetDataset
+from espnet2.tasks.abs_task import build_batch_sampler
 
 extractor_choices = ClassChoices(
     name="extractor",
@@ -43,6 +61,7 @@ preprocessor_choices = ClassChoices(
     name="preprocessor",
     classes=dict(
         tse=TSEPreprocessor,
+        enh_tse=EnhTsePreprocessor,
     ),
     type_check=AbsPreprocessor,
     default="tse",
@@ -217,11 +236,199 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             default=False,
             help="Whether to force all data to be single-channel.",
         )
+        # used for selection {num_spk}-mix in 2-5mix
+        group.add_argument(
+            "--n_mix",
+            type=int,
+            nargs="+",
+            default=None,
+        )
 
         for class_choices in cls.class_choices_list:
             # Append --<name> and --<name>_conf.
             # e.g. --encoder and --encoder_conf
             class_choices.add_arguments(group)
+
+    @classmethod
+    def build_iter_options(
+        cls,
+        args: argparse.Namespace,
+        distributed_option: DistributedOption,
+        mode: str,
+    ):
+        if mode == "train":
+            preprocess_fn = cls.build_preprocess_fn(args, train=True)
+            collate_fn = cls.build_collate_fn(args, train=True)
+            data_path_and_name_and_type = args.train_data_path_and_name_and_type
+            shape_files = args.train_shape_file
+            batch_size = args.batch_size
+            batch_bins = args.batch_bins
+            batch_type = args.batch_type
+            max_cache_size = args.max_cache_size
+            max_cache_fd = args.max_cache_fd
+            distributed = distributed_option.distributed
+            num_batches = None
+            num_iters_per_epoch = args.num_iters_per_epoch
+            train = True
+
+        elif mode == "valid":
+            preprocess_fn = cls.build_preprocess_fn(args, train=False)
+            collate_fn = cls.build_collate_fn(args, train=False)
+            data_path_and_name_and_type = args.valid_data_path_and_name_and_type
+            shape_files = args.valid_shape_file
+
+            if args.valid_batch_type is None:
+                batch_type = args.batch_type
+            else:
+                batch_type = args.valid_batch_type
+            if args.valid_batch_size is None:
+                batch_size = args.batch_size
+            else:
+                batch_size = args.valid_batch_size
+            if args.valid_batch_bins is None:
+                batch_bins = args.batch_bins
+            else:
+                batch_bins = args.valid_batch_bins
+            if args.valid_max_cache_size is None:
+                # Cache 5% of maximum size for validation loader
+                max_cache_size = 0.05 * args.max_cache_size
+            else:
+                max_cache_size = args.valid_max_cache_size
+            max_cache_fd = args.max_cache_fd
+            distributed = distributed_option.distributed
+            num_batches = None
+            # num_iters_per_epoch = None
+            num_iters_per_epoch=args.num_iters_valid  # added
+            train = False
+
+        elif mode == "plot_att":
+            preprocess_fn = cls.build_preprocess_fn(args, train=False)
+            collate_fn = cls.build_collate_fn(args, train=False)
+            data_path_and_name_and_type = args.valid_data_path_and_name_and_type
+            shape_files = args.valid_shape_file
+            batch_type = "unsorted"
+            batch_size = 1
+            batch_bins = 0
+            num_batches = args.num_att_plot
+            max_cache_fd = args.max_cache_fd
+            # num_att_plot should be a few sample ~ 3, so cache all data.
+            max_cache_size = np.inf if args.max_cache_size != 0.0 else 0.0
+            # always False because plot_attention performs on RANK0
+            distributed = False
+            num_iters_per_epoch = None
+            train = False
+        else:
+            raise NotImplementedError(f"mode={mode}")
+
+        return IteratorOptions(
+            preprocess_fn=preprocess_fn,
+            collate_fn=collate_fn,
+            data_path_and_name_and_type=data_path_and_name_and_type,
+            shape_files=shape_files,
+            batch_type=batch_type,
+            batch_size=batch_size,
+            batch_bins=batch_bins,
+            num_batches=num_batches,
+            max_cache_size=max_cache_size,
+            max_cache_fd=max_cache_fd,
+            distributed=distributed,
+            num_iters_per_epoch=num_iters_per_epoch,
+            train=train,
+        )
+
+    @classmethod
+    def build_sequence_iter_factory(
+        cls, args: argparse.Namespace, iter_options: IteratorOptions, mode: str
+    ) -> AbsIterFactory:
+        assert check_argument_types()
+
+        dataset = ESPnetDataset(
+            iter_options.data_path_and_name_and_type,
+            float_dtype=args.train_dtype,
+            preprocess=iter_options.preprocess_fn,
+            max_cache_size=iter_options.max_cache_size,
+            max_cache_fd=iter_options.max_cache_fd,
+        )
+        cls.check_task_requirements(
+            dataset, args.allow_variable_data_keys, train=iter_options.train
+        )
+
+        if Path(
+            Path(iter_options.data_path_and_name_and_type[0][0]).parent, "utt2category"
+        ).exists():
+            utt2category_file = str(
+                Path(
+                    Path(iter_options.data_path_and_name_and_type[0][0]).parent,
+                    "utt2category",
+                )
+            )
+            # logging.warning("Reading " + utt2category_file)
+            logging.info("\n\nReading " + utt2category_file)
+        else:
+            logging.info("\n\nNOT Reading " + utt2category_file)
+            utt2category_file = None
+
+        batch_sampler = build_batch_sampler(
+            type=iter_options.batch_type,
+            shape_files=iter_options.shape_files,
+            fold_lengths=args.fold_length,
+            batch_size=iter_options.batch_size,
+            batch_bins=iter_options.batch_bins,
+            sort_in_batch=args.sort_in_batch,
+            sort_batch=args.sort_batch,
+            drop_last=False,
+            min_batch_size=torch.distributed.get_world_size()
+            if iter_options.distributed
+            else 1,
+            utt2category_file=utt2category_file,
+        )
+
+        batches = list(batch_sampler)
+        if iter_options.num_batches is not None:
+            batches = batches[: iter_options.num_batches]
+        if args.n_mix is not None:
+            assert isinstance(args.n_mix, list)
+            logging.info("Remove unspecified data")
+            num_batches_before = len(batches)
+            new_batches = []
+            logging.info(args.n_mix)
+            for batch in batches:
+                if int(batch[0][0]) in args.n_mix:
+                    new_batches.append(batch)
+            batches = new_batches
+            num_batches_after = len(batches)
+            logging.info(f"Original batches: {num_batches_before}, Current batches: {num_batches_after}")
+
+        bs_list = [len(batch) for batch in batches]
+
+        logging.info(f"[{mode}] dataset:\n{dataset}")
+        logging.info(f"[{mode}] Batch sampler: {batch_sampler}")
+        logging.info(
+            f"[{mode}] mini-batch sizes summary: N-batch={len(bs_list)}, "
+            f"mean={np.mean(bs_list):.1f}, min={np.min(bs_list)}, max={np.max(bs_list)}"
+        )
+
+        if iter_options.distributed:
+            world_size = torch.distributed.get_world_size()
+            rank = torch.distributed.get_rank()
+            for batch in batches:
+                if len(batch) < world_size:
+                    raise RuntimeError(
+                        f"The batch-size must be equal or more than world_size: "
+                        f"{len(batch)} < {world_size}"
+                    )
+            batches = [batch[rank::world_size] for batch in batches]
+
+        return SequenceIterFactory(
+            dataset=dataset,
+            batches=batches,
+            seed=args.seed,
+            num_iters_per_epoch=iter_options.num_iters_per_epoch,
+            shuffle=iter_options.train,
+            num_workers=args.num_workers,
+            collate_fn=iter_options.collate_fn,
+            pin_memory=args.ngpu > 0,
+        )
 
     @classmethod
     def build_collate_fn(
@@ -239,8 +446,12 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
         cls, args: argparse.Namespace, train: bool
     ) -> Optional[Callable[[str, Dict[str, np.array]], Dict[str, np.ndarray]]]:
         assert check_argument_types()
-        retval = TSEPreprocessor(
+        # retval = TSEPreprocessor(
+        retval = EnhTsePreprocessor(
             train=train,
+            dummy_label=getattr(args, "dummy_label", "dummy"),
+            speech_segment=getattr(args, "chunk_length", None),
+            # inherited from TSEPreprocessor
             train_spk2enroll=args.train_spk2enroll,
             enroll_segment=getattr(args, "enroll_segment", None),
             load_spk_embedding=getattr(args, "load_spk_embedding", False),
@@ -335,39 +546,6 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             loss_wrappers=loss_wrappers,
             **args.model_conf
         )
-
-        '''
-        tse_loss_wrappers = []
-        enh_loss_wrappers = []
-        if getattr(args, "tse_criterions", None) is not None:
-            # This check is for the compatibility when load models
-            # that packed by older version
-            for ctr in args.tse_criterions:
-                criterion_conf = ctr.get("conf", {})
-                criterion = criterion_choices.get_class(ctr["name"])(**criterion_conf)
-                loss_wrapper = loss_wrapper_choices.get_class(ctr["wrapper"])(
-                    criterion=criterion, **ctr["wrapper_conf"]
-                )
-                tse_loss_wrappers.append(loss_wrapper)
-        if getattr(args, "enh_criterions", None) is not None:
-            # This check is for the compatibility when load models
-            # that packed by older version
-            for ctr in args.enh_criterions:
-                criterion_conf = ctr.get("conf", {})
-                criterion = criterion_choices.get_class(ctr["name"])(**criterion_conf)
-                loss_wrapper = loss_wrapper_choices.get_class(ctr["wrapper"])(
-                    criterion=criterion, **ctr["wrapper_conf"]
-                )
-                enh_loss_wrappers.append(loss_wrapper)
-        model = ESPnetExtractionEnhancementModel(
-            encoder=encoder,
-            extractor=extractor,
-            decoder=decoder,
-            tse_loss_wrappers=tse_loss_wrappers,
-            enh_loss_wrappers=enh_loss_wrappers,
-            **args.model_conf
-        )
-        '''
 
         # FIXME(kamo): Should be done in model?
         # 2. Initialize

@@ -388,7 +388,6 @@ class TemporalConvNetInformedWithAttention(TemporalConvNet):
             output = output.reshape(M, -1, N, K)
             output = self.adapt_layer(output, enroll_emb)
         elif enroll_emb is not None and self.adapt_layer_type != "attn":
-            print(output.shape, enroll_emb.shape)
             output = self.adapt_layer(output, enroll_emb)
         else:
             output = output.reshape(-1, N, K)

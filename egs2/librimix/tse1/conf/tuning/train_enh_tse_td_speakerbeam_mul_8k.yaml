@@ -1,7 +1,7 @@
 optim: adam
 max_epoch: 400
 batch_type: folded
-batch_size: 8
+batch_size: 4
 iterator_type: chunk
 chunk_length: 24000
 # exclude keys "enroll_ref", "enroll_ref1", "enroll_ref2", ...
@@ -37,6 +37,7 @@ scheduler_conf:
 model_conf:
     num_spk: 2
     share_encoder: true
+    task: tse
 
 train_spk2enroll: data/train-100/spk2enroll.json
 enroll_segment: 24000
@@ -82,6 +83,6 @@ criterions:
     wrapper_conf:
       weight: 1.0
 
-use_wandb: true
+use_wandb: false
 wandb_project: universal_speech_enhancement
 wandb_name: tdspkbeam_mul_tse_8k

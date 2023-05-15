@@ -27,7 +27,7 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         loss_wrappers: List[AbsLossWrapper],
         num_spk: int = 1,
         share_encoder: bool = True,
-        task: str = "tse_ss"
+        task: str = "enh_tse"
     ):
         assert check_argument_types()
 
@@ -53,8 +53,10 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         # for multi-channel signal
         self.ref_channel = getattr(self.extractor, "ref_channel", -1)
 
-        assert task in ["tse", "ss", "tse_ss"]
+        assert task in ["tse", "enh", "enh_tse"]
         self.task = task
+        print(f"Task is {self.task}")
+        print(f"Number of speakers {self.num_spk}")
 
     def forward(
         self,
@@ -92,6 +94,13 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
             for spk in range(self.num_spk)
             if "speech_ref{}".format(spk + 1) in kwargs
         ]
+        # remove dummy tensor with length of one
+        speech_ref_len = len(speech_ref)
+        speech_ref_org = speech_ref
+        speech_ref = [s for s in speech_ref if s.shape[-1]>1]
+        for s in range(len(speech_ref), self.num_spk, 1):
+            if "speech_ref{}".format(s + 1) in kwargs:
+                kwargs.pop("speech_ref{}".format(s + 1))
         # (Batch, num_speaker, samples) or (Batch, num_speaker, samples, channels)
         speech_ref = torch.stack(speech_ref, dim=1)
         batch_size = speech_mix.shape[0]
@@ -104,6 +113,12 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
             for spk in range(self.num_spk)
             if "enroll_ref{}".format(spk + 1) in kwargs
         ]
+        # remove dummy tensor with length of one
+        enroll_ref = [s for s in enroll_ref if s.shape[-1]>1]
+        # remove keys from kwargs
+        for s in range(len(enroll_ref), self.num_spk, 1):
+            if "enroll_ref{}".format(s + 1) in kwargs:
+                kwargs.pop("enroll_ref{}".format(s + 1))
         enroll_ref_lengths = [
             # (Batch,)
             kwargs.get(
@@ -177,21 +192,28 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         assert len(speech_ref) == len(enroll_ref), (len(speech_ref), len(enroll_ref))
 
         import random
-        is_tse = random.random() > 0.5
         if self.task == "tse":
             is_tse = True
-        elif self.task == "ss":
+        elif self.task == "enh":
             is_tse = False
+        else: # randomly select TSE or Enhancement
+            is_tse = random.random() > 0.5
         if is_tse:
             # speech_ref, speech_lengths = [speech_ref[0]], [speech_lengths[0]]
-            speech_ref = [speech_ref[0]]
-            enroll_ref, enroll_ref_lengths = [enroll_ref[0]], [enroll_ref_lengths[0]]
+            spk_idx = random.randint(0, len(speech_ref)-1)
+            speech_ref = [speech_ref[spk_idx]]
+            enroll_ref, enroll_ref_lengths = [enroll_ref[spk_idx]], [enroll_ref_lengths[spk_idx]]
+            # speech_ref = [s[0] for s in speech_ref]
+            # enroll_ref, enroll_ref_lengths = [s[0] for s in enroll_ref], [s[0] for s in enroll_ref_length]
         else:
             enroll_ref = None
 
         # model forward
+        # num_spk = len(speech_ref) if self.training else None
+        num_spk = len(speech_ref)
+        # print(speech_ref[0].shape, len(speech_ref))
         speech_pre, feature_mix, feature_pre, others = self.forward_enhance(
-            speech_mix, speech_lengths, enroll_ref, enroll_ref_lengths, is_tse
+            speech_mix, speech_lengths, enroll_ref, enroll_ref_lengths, num_spk=num_spk, is_tse=is_tse
         )
 
         # loss computation
@@ -204,6 +226,7 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
             speech_ref,
             noise_ref,
             dereverb_speech_ref,
+            num_spk=num_spk,
             is_tse=is_tse
         )
         return loss, stats, weight
@@ -214,6 +237,7 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         speech_lengths: torch.Tensor,
         enroll_ref: torch.Tensor,
         enroll_ref_lengths: torch.Tensor,
+        num_spk: int = None,
         is_tse: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         feature_mix, flens = self.encoder(speech_mix, speech_lengths)
@@ -240,6 +264,7 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                         feature_aux[spk],
                         flens_aux[spk],
                         suffix_tag=f"_spk{spk + 1}",
+                        num_spk=num_spk,
                     )
                     for spk in range(len(enroll_ref))
                 ]
@@ -253,7 +278,7 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                 speech_pre = None
         else:
             # feature_pre, flens, others = self.extractor(feature_mix, flens, additional)
-            feature_pre, flens, others = self.extractor(feature_mix, flens)
+            feature_pre, flens, others = self.extractor(feature_mix, flens, num_spk=num_spk)
             if feature_pre is not None:
                 # for models like SVoice that output multiple lists of separated signals
                 pre_is_multi_list = isinstance(feature_pre[0], (list, tuple))
@@ -280,6 +305,7 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         speech_ref: torch.Tensor,
         noise_ref: torch.Tensor = None,
         dereverb_speech_ref: torch.Tensor = None,
+        num_spk: int = None,
         is_tse: bool = True,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
 
@@ -330,6 +356,7 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
 
                 if perm is None and "perm" in o:
                     perm = o["perm"]
+            stats[f"tse_{num_spk}spk_loss"] = loss
         else:
             # for calculating loss on estimated noise signals
             if getattr(self.extractor, "predict_noise", False):
@@ -446,6 +473,21 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
 
                 if perm is None and "perm" in o:
                     perm = o["perm"]
+
+            # register loss value
+            stats[f"enh_{num_spk}spk_loss"] = loss.detach()
+            # compute EDA counting loss
+            if "existance_probability" in others:
+                import torch
+                bce = torch.nn.BCELoss(reduction="sum")
+                exist, non_exist = others["existance_probability"][..., :num_spk], others["existance_probability"][..., num_spk]
+                bce_loss_exist = bce(exist, torch.ones_like(exist))
+                bce_loss_non_exist = bce(non_exist, torch.zeros_like(non_exist))
+                bce_loss = (bce_loss_exist + bce_loss_non_exist) / (num_spk + 1)
+                loss += bce_loss
+                stats["attractor_loss"] = bce_loss.detach()
+                stats["attractor_loss_exist"] = bce_loss_exist.detach()
+                stats["attractor_loss_nonexist"] = bce_loss_non_exist.detach()
 
         if self.training and isinstance(loss, float):
             raise AttributeError(

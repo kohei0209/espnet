@@ -102,6 +102,7 @@ class DPRNNEDAExtractor(AbsExtractor, AbsSeparator):
         input_aux: torch.Tensor = None,
         ilens_aux: torch.Tensor = None,
         suffix_tag: str = "",
+        num_spk: int = None,
     ) -> Tuple[List[Union[torch.Tensor, ComplexTensor]], torch.Tensor, OrderedDict]:
         """Forward.
 
@@ -146,7 +147,7 @@ class DPRNNEDAExtractor(AbsExtractor, AbsSeparator):
 
         # dual-path block
         # should be modified to receive the num_spk as the forward argument instead of using self.num_spk
-        processed, probabilities = self.dprnn(segmented, enroll_emb, num_spk=self.num_spk)  # B, N, L, K
+        processed, probabilities = self.dprnn(segmented, enroll_emb, num_spk=num_spk)  # B, N, L, K
         # overlap-add
         processed = merge_feature(processed, rest)  # B, N*num_spk, T
         processed = processed.transpose(1, 2)  # B, T, N*num_spk

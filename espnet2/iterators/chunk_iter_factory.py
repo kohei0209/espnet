@@ -198,20 +198,20 @@ class ChunkIterFactory(AbsIterFactory):
                     state,
                 )
 
-            cache_id_list_dict[W] = cache_id_list
-            cache_chunks_dict[W] = cache_chunks
+                cache_id_list_dict[W] = cache_id_list
+                cache_chunks_dict[W] = cache_chunks
 
-        else:
-            for W in cache_id_list_dict:
-                cache_id_list = cache_id_list_dict.setdefault(W, [])
-                cache_chunks = cache_chunks_dict.setdefault(W, {})
+            else:
+                for W in cache_id_list_dict:
+                    cache_id_list = cache_id_list_dict.setdefault(W, [])
+                    cache_chunks = cache_chunks_dict.setdefault(W, {})
 
-                yield from self._generate_mini_batches(
-                    cache_id_list,
-                    cache_chunks,
-                    shuffle,
-                    state,
-                )
+                    yield from self._generate_mini_batches(
+                        cache_id_list,
+                        cache_chunks,
+                        shuffle,
+                        state,
+                    )
 
     def _generate_mini_batches(
         self,

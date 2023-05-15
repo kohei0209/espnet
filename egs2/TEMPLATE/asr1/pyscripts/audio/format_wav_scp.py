@@ -175,6 +175,7 @@ def main():
     )
     parser.add_argument("--audio-format", default="wav")
     parser.add_argument("--vad_based_trim", type=str, default=None)
+    parser.add_argument("--dummy_label", type=str, default="dummy")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--ref-channels", default=None, type=str2int_tuple)
     group.add_argument("--utt2ref-channels", default=None, type=str)
@@ -261,122 +262,128 @@ def main():
             with Path(args.scp).open("r") as fscp:
                 for line in tqdm(fscp):
                     uttid, wavpath = line.strip().split(None, 1)
-
-                    # B.a. Without segments and using pipe inputs
-                    if wavpath.endswith("|"):
-                        if args.multi_columns_input:
-                            raise RuntimeError(
-                                "Not supporting multi_columns wav.scp for inputs by"
-                                " pipe"
-                            )
-                        # Streaming input e.g. cat a.wav |
-                        with kaldiio.open_like_kaldi(wavpath, "rb") as f:
-                            with BytesIO(f.read()) as g:
-                                wave, rate = soundfile.read(g)
-                        subtypes = None
-
-                    # B.b Without segments and not using pipe
+                    # handling dummy input
+                    if args.dummy_label in wavpath:
+                        wave, rate, subtypes = None, None, None
                     else:
-                        if args.multi_columns_input:
-                            wave, rate, subtypes = soundfile_read(
-                                wavs=wavpath.split(),
-                                dtype=None,
-                                always_2d=False,
-                                concat_axis=1,
-                            )
+                        # B.a. Without segments and using pipe inputs
+                        if wavpath.endswith("|"):
+                            if args.multi_columns_input:
+                                raise RuntimeError(
+                                    "Not supporting multi_columns wav.scp for inputs by"
+                                    " pipe"
+                                )
+                            # Streaming input e.g. cat a.wav |
+                            with kaldiio.open_like_kaldi(wavpath, "rb") as f:
+                                with BytesIO(f.read()) as g:
+                                    wave, rate = soundfile.read(g)
+                            subtypes = None
+
+                        # B.b Without segments and not using pipe
                         else:
-                            with soundfile.SoundFile(wavpath) as sf:
-                                rate = sf.samplerate
-                                subtypes = [sf.subtype]
-                                wave = sf.read()
+                            if args.multi_columns_input:
+                                wave, rate, subtypes = soundfile_read(
+                                    wavs=wavpath.split(),
+                                    dtype=None,
+                                    always_2d=False,
+                                    concat_axis=1,
+                                )
+                            else:
+                                with soundfile.SoundFile(wavpath) as sf:
+                                    rate = sf.samplerate
+                                    subtypes = [sf.subtype]
+                                    wave = sf.read()
                     yield uttid, (wave, rate), wavpath, subtypes
 
     with out_num_samples.open("w") as fnum_samples:
         for uttid, (wave, rate), wavpath, subtypes in tqdm(generator()):
-            save_asis = True
-            if args.fs is not None and args.fs != rate:
-                # FIXME(kamo): To use sox?
-                wave = resampy.resample(wave, rate, args.fs, axis=0)
-                rate = args.fs
-                save_asis = False
-
-            if args.vad_based_trim is not None:
-                wave = vad_trim(vad_reader, uttid, wave, rate)
-                save_asis = False
-
-            if wave.ndim == 2 and utt2ref_channels is not None:
-                wave = wave[:, utt2ref_channels(uttid)]
-                save_asis = False
-
-            if args.segments is not None:
-                save_asis = False
-
-            if args.audio_format.endswith("ark"):
-                save_asis = False
-
-            if args.multi_columns_input:
-                if args.multi_columns_output:
-                    if wavpath is not None:
-                        for _wavpath in wavpath.split():
-                            if Path(_wavpath).suffix != "." + args.audio_format:
-                                save_asis = False
-                                break
-
-                        if wave.ndim == 1:
-                            _num_ch = 1
-                        else:
-                            _num_ch = wave.shape[1]
-                        if len(wavpath.split()) != _num_ch:
-                            save_asis = False
-                else:
-                    if wavpath is not None and len(wavpath.split()) > 1:
-                        save_asis = False
-
-            elif args.multi_columns_output:
-                if wave.ndim == 2 and wave.shape[1] > 1:
+            if wavpath != args.dummy_label:
+                save_asis = True
+                if args.fs is not None and args.fs != rate:
+                    # FIXME(kamo): To use sox?
+                    wave = resampy.resample(wave, rate, args.fs, axis=0)
+                    rate = args.fs
                     save_asis = False
 
-            if wavpath is not None and wavpath.endswith("|"):
-                save_asis = False
-            if wavpath is not None and Path(wavpath).suffix != "." + args.audio_format:
-                save_asis = False
+                if args.vad_based_trim is not None:
+                    wave = vad_trim(vad_reader, uttid, wave, rate)
+                    save_asis = False
 
-            if not args.audio_format.endswith("ark") and subtypes is not None:
-                if args.audio_subtype is None:
-                    subtype2 = soundfile.default_subtype(args.audio_format)
-                else:
-                    subtype2 = args.audio_subtype
-                for subtype in subtypes:
-                    if subtype != subtype2:
+                if wave.ndim == 2 and utt2ref_channels is not None:
+                    wave = wave[:, utt2ref_channels(uttid)]
+                    save_asis = False
+
+                if args.segments is not None:
+                    save_asis = False
+
+                if args.audio_format.endswith("ark"):
+                    save_asis = False
+
+                if args.multi_columns_input:
+                    if args.multi_columns_output:
+                        if wavpath is not None:
+                            for _wavpath in wavpath.split():
+                                if Path(_wavpath).suffix != "." + args.audio_format:
+                                    save_asis = False
+                                    break
+
+                            if wave.ndim == 1:
+                                _num_ch = 1
+                            else:
+                                _num_ch = wave.shape[1]
+                            if len(wavpath.split()) != _num_ch:
+                                save_asis = False
+                    else:
+                        if wavpath is not None and len(wavpath.split()) > 1:
+                            save_asis = False
+
+                elif args.multi_columns_output:
+                    if wave.ndim == 2 and wave.shape[1] > 1:
                         save_asis = False
-                        break
 
-            if save_asis:
-                writer.fscp.write(f"{uttid} {wavpath}\n")
+                if wavpath is not None and wavpath.endswith("|"):
+                    save_asis = False
+                if wavpath is not None and Path(wavpath).suffix != "." + args.audio_format:
+                    save_asis = False
 
-            elif args.audio_format.endswith("ark"):
-                for name in soundfile.available_formats():
-                    if name.lower() in args.audio_format.lower():
-                        suf = name.lower()
-                        break
+                if not args.audio_format.endswith("ark") and subtypes is not None:
+                    if args.audio_subtype is None:
+                        subtype2 = soundfile.default_subtype(args.audio_format)
+                    else:
+                        subtype2 = args.audio_subtype
+                    for subtype in subtypes:
+                        if subtype != subtype2:
+                            save_asis = False
+                            break
+
+                if save_asis:
+                    writer.fscp.write(f"{uttid} {wavpath}\n")
+
+                elif args.audio_format.endswith("ark"):
+                    for name in soundfile.available_formats():
+                        if name.lower() in args.audio_format.lower():
+                            suf = name.lower()
+                            break
+                    else:
+                        raise RuntimeError(f"{args.audio_format} is not supported.")
+
+                    # NOTE(kamo): Using extended ark format style here.
+                    # This format is incompatible with Kaldi
+                    kaldiio.save_ark(
+                        fark,
+                        {uttid: (wave, rate)},
+                        scp=fscp_out,
+                        append=True,
+                        write_function="soundfile",
+                        write_kwargs={"format": suf, "subtype": args.audio_subtype},
+                    )
+
                 else:
-                    raise RuntimeError(f"{args.audio_format} is not supported.")
-
-                # NOTE(kamo): Using extended ark format style here.
-                # This format is incompatible with Kaldi
-                kaldiio.save_ark(
-                    fark,
-                    {uttid: (wave, rate)},
-                    scp=fscp_out,
-                    append=True,
-                    write_function="soundfile",
-                    write_kwargs={"format": suf, "subtype": args.audio_subtype},
-                )
-
+                    writer[uttid] = rate, wave
+                fnum_samples.write(f"{uttid} {len(wave)}\n")
             else:
-                writer[uttid] = rate, wave
-            fnum_samples.write(f"{uttid} {len(wave)}\n")
-
+                writer.fscp.write(f"{uttid} {wavpath}\n")
+                fnum_samples.write(f"{uttid} 0\n")
 
 if __name__ == "__main__":
     main()

@@ -658,6 +658,13 @@ class AbsTask(ABC):
         )
 
         group = parser.add_argument_group("BatchSampler related")
+        # added
+        group.add_argument(
+            "--num_iters_valid",
+            type=int_or_none,
+            default=None,
+            help="Restrict the number of iterations for validation per epoch",
+        )
         group.add_argument(
             "--num_iters_per_epoch",
             type=int_or_none,
@@ -1543,9 +1550,12 @@ class AbsTask(ABC):
                     "utt2category",
                 )
             )
-            logging.warning("Reading " + utt2category_file)
+            # logging.warning("Reading " + utt2category_file)
+            logging.info("\n\nReading " + utt2category_file)
         else:
+            logging.info("\n\nNOT Reading " + utt2category_file)
             utt2category_file = None
+
         batch_sampler = build_batch_sampler(
             type=iter_options.batch_type,
             shape_files=iter_options.shape_files,
@@ -1605,6 +1615,22 @@ class AbsTask(ABC):
     ) -> AbsIterFactory:
         assert check_argument_types()
 
+        if Path(
+            Path(iter_options.data_path_and_name_and_type[0][0]).parent, "utt2category"
+        ).exists():
+            utt2category_file = str(
+                Path(
+                    Path(iter_options.data_path_and_name_and_type[0][0]).parent,
+                    "utt2category",
+                )
+            )
+            # logging.warning("\n\nReading " + utt2category_file)
+            logging.info("\n\nReading " + utt2category_file)
+        else:
+            logging.info("\n\nNot Reading utt2category")
+            utt2category_file = None
+        utt2category_file = None
+
         dataset = ESPnetDataset(
             iter_options.data_path_and_name_and_type,
             float_dtype=args.train_dtype,
@@ -1621,7 +1647,10 @@ class AbsTask(ABC):
         else:
             key_file = iter_options.shape_files[0]
 
-        batch_sampler = UnsortedBatchSampler(batch_size=1, key_file=key_file)
+        batch_sampler = UnsortedBatchSampler(
+            batch_size=1, key_file=key_file,
+            utt2category_file=utt2category_file,
+        )
         batches = list(batch_sampler)
         if iter_options.num_batches is not None:
             batches = batches[: iter_options.num_batches]

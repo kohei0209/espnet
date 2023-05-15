@@ -460,7 +460,7 @@ class DPRNN_EDA_Informed(nn.Module):
 
             # compute attractor
             if i == self.i_eda_layer:
-                assert num_spk is not None, f"num_spk must be specified if using the EDA module during training"
+                # assert num_spk is not None, f"num_spk must be specified if using the EDA module during training"
                 # sequence aggregation
                 aggregated_sequence = self.sequence_aggregation(output.transpose(-1, -3))
                 # encoder-decoder-attractor
@@ -470,12 +470,10 @@ class DPRNN_EDA_Informed(nn.Module):
                 # reshape again
                 output = output.reshape(-1, hidden_dim, dim1, dim2)
                 batch_size = output.shape[0]
-            else:
-                probabilities = None
             # for TSE
             if i == self.i_adapt_layer:
                 if self.adapt_layer_type != "attn":
-                    assert num_spk == 1
+                    assert num_spk == 1, f"num_spk = {num_spk}"
                     assert is_tse
                     output = output.reshape(-1, hidden_dim, dim1, dim2)
                     if enroll_emb.ndim == 2:
@@ -499,6 +497,8 @@ class DPRNN_EDA_Informed(nn.Module):
             #     output = self.output2(output)
             #     output = output.reshape(-1, hidden_dim, dim1, dim2)
             #     batch_size = output.shape[0]
+        if self.i_eda_layer is None:
+            probabilities = None
         output = self.output(output)
         output = output.reshape(orig_batch_size, -1, dim1, dim2) # [B*J, N, L, K]->[B, J*N, L, K], J: num_spks
         return output, probabilities
@@ -559,8 +559,8 @@ class EncoderDecoderAttractor(nn.Module):
         outputs, existence_probabilities = [], []
         # estimate the number of speakers (inference)
         if num_spk is None:
-            assert batch_size == 1, "We don't support batched computation in inference"
-            for j in range(100):
+            # assert batch_size == 1, "We don't support batched computation in inference"
+            for j in range(6):
                 output, state = self.lstm_decoder(zero_input, last_state)
                 existence_probability = self.attractor_existence_estimator(output)
                 existence_probabilities.append(existence_probability)
@@ -573,11 +573,11 @@ class EncoderDecoderAttractor(nn.Module):
             for j in range(num_spk + 1):
                 output, state = self.lstm_decoder(zero_input, last_state)
                 outputs.append(output[..., 0, :])
-                existence_probability = self.attractor_existence_estimator(output)
+                existence_probability = self.attractor_existence_estimator(output)[..., 0]
                 existence_probabilities.append(existence_probability)
 
         outputs = torch.stack(outputs, dim=1) # [B, J, H]
-        existence_probabilities = torch.stack(existence_probabilities, dim=1) # [B, J]
+        existence_probabilities = torch.cat(existence_probabilities, dim=1) # [B, J]
         return outputs, existence_probabilities
 
 

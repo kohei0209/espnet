@@ -15,7 +15,9 @@ test_sets="tt_${min_or_max}_${sample_rate} "
 
 config=./conf/tuning/train_enh_dprnn_tasnet.yaml
 
-./enh.sh \
+./enh2.sh \
+    --is_tse_task false \
+    --is_tse_and_ss_task true \
     --train_set "${train_set}" \
     --valid_set "${valid_set}" \
     --test_sets "${test_sets}" \
