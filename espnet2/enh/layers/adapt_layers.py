@@ -109,7 +109,6 @@ class MulAddAdaptLayer(nn.Module):
             len(enroll),
             self.ninputs,
         )
-
         out = []
         for main0, enroll0 in zip(main, enroll):
             if self.do_addition:
@@ -121,11 +120,116 @@ class MulAddAdaptLayer(nn.Module):
 
 
 class AttentionAdaptLayer(nn.Module):
+    def __init__(self, indim, enrolldim, ninputs=1, attention_dim=200, hidden_dim=200, is_dualpath_process=False):
+        super().__init__()
+        self.ninputs = ninputs
+
+        nonlinear = nn.ReLU()
+        self.mlp_v = nn.Sequential(
+            nn.Linear(indim, hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, attention_dim),
+        )
+        self.mlp_iv = nn.Sequential(
+            nn.Linear(indim, hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, attention_dim),
+        )
+        self.mlp_aux = nn.Sequential(
+            nn.Linear(enrolldim, hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, attention_dim),
+        )
+
+        self.W_v = nn.Linear(attention_dim, attention_dim, bias=False)
+        self.W_iv = nn.Linear(attention_dim, attention_dim, bias=False)
+        self.W_aux = nn.Linear(attention_dim, attention_dim, bias=False)
+        self.w = nn.Linear(attention_dim, 1, bias=False)
+        self.b = nn.Parameter(torch.randn(attention_dim))
+
+        self.attention_activation = nn.Tanh()
+        self.softmax = nn.Softmax(dim=-2)
+        self.alpha = 2
+        self.indim = indim
+        self.is_dualpath_process = is_dualpath_process
+
+        # assert enrolldim == indim, (enrolldim, indim)
+
+    def forward(self, main, enroll=None):
+        """MulAddAdaptLayer Forward.
+
+        Args:
+            main: tensor or tuple or list
+                  activations in the main neural network, which are adapted
+                  tuple/list may be useful when we want to apply the adaptation
+                    to both normal and skip connection at once
+            enroll: tensor or tuple or list
+                    embedding extracted from enrollment
+                    tuple/list may be useful when we want to apply the adaptation
+                      to both normal and skip connection at once
+        """
+        outputs = []
+        orig_type = type(main)
+        is_tse = enroll is not None
+
+        if not isinstance(main, tuple):
+            main = (main, )
+            enroll = (enroll, )
+        for main0, enroll0 in zip(main, enroll):
+            # non-dualpath case:
+            #   main: (..., nspk, time, hidden)
+            #   enroll: (..., time, hidden)
+            # dual-path case:
+            #   main: (..., nspk, chunk_size, num_chunk, hidden)
+            #   enroll: (..., chunk_size, num_chunk, hidden)
+            if is_tse:
+                assert type(main0) == type(enroll0)
+                if self.is_dualpath_process:
+                    batch, num_spk, chunk_size, num_chunks, hidden = main0.shape
+                    main0 = main0.permute(0, 2, 3, 1, 4)
+                    mean_dim = (1, 2)
+                else:
+                    batch, num_spk, time, hidden = main0.shape
+                    main0 = main0.transpose(-2, -3)
+                    mean_dim = (1, )
+                s_v = self.mlp_v(main0) # (..., time, nspk, hidden)
+                s_iv = self.mlp_iv(main0).mean(dim=mean_dim, keepdim=True) # (..., 1, nspk, hidden)
+                s_aux = self.mlp_aux(enroll0).mean(dim=mean_dim, keepdim=True)  #(..., 1, hidden)
+
+                # e: [batch, chunk_size, num_chunk, n_enroll, nspk, hidden] / [batch, time, n_enroll, nspk, hidden]
+                # a: [batch, chunk_size, num_chunk, n_enroll, nspk, 1]
+                e_v = self.W_v(s_v) # (batch, chunk_size, num_chunk, nspk, hidden)
+                e_iv = self.W_iv(s_iv) # (..., nspk, hidden)
+                e_aux = self.W_aux(s_aux) # (batch, 1, 1, hidden) / (batch, 1, hidden)
+                e = e_v[..., None, :, :] + e_iv[..., None, :, :] + e_aux[..., None, None, :, :] + self.b
+                e = self.w(self.attention_activation(e))
+                a = self.softmax(e*self.alpha)
+                out = (a * main0[..., None, :, :]).sum(dim=-2)[..., 0, :]
+            else:
+                if self.is_dualpath_process:
+                    batch, chunk_size, num_chunks, num_spk, hidden = main0.shape
+                    zeros = main0.new_zeros((batch, chunk_size, num_chunks, 1, 1, 1))
+                    ones = main0.new_ones((batch, chunk_size, num_chunks, 1, 1, 1))
+                else:
+                    batch, time, num_spk, hidden = main0.shape
+                    zeros = main0.new_zeros((batch, time, 1, 1, 1))
+                    ones = main0.new_ones((batch, time, 1, 1, 1))
+                a = torch.cat((torch.cat((ones, zeros), dim=-2), torch.cat((zeros, ones), dim=-2)), dim=-3)
+                out = (a * main0[..., None, :, :]).sum(dim=-2)
+            outputs.append(out)
+        return into_orig_type(tuple(outputs), orig_type)
+
+
+'''
+class AttentionAdaptLayer(nn.Module):
     def __init__(self, indim, enrolldim, ninputs=1, attention_dim=200, is_dualpath_process=False):
         super().__init__()
         self.ninputs = ninputs
 
-        nonlinear = nn.PReLU()
+        nonlinear = nn.ReLU()
 
         # attention modules
         self.mlp1 = nn.Sequential(
@@ -143,7 +247,7 @@ class AttentionAdaptLayer(nn.Module):
         )
 
         self.mlp_aux = nn.Sequential(
-            nn.Linear(indim, attention_dim),
+            nn.Linear(enrolldim, attention_dim),
             nn.Linear(attention_dim, attention_dim),
             nonlinear,
             nn.Linear(attention_dim, attention_dim),
@@ -161,7 +265,7 @@ class AttentionAdaptLayer(nn.Module):
         self.indim = indim
         self.is_dualpath_process = is_dualpath_process
 
-        assert enrolldim == indim, (enrolldim, indim)
+        # assert enrolldim == indim, (enrolldim, indim)
 
     def forward(self, main, enroll=None):
         """MulAddAdaptLayer Forward.
@@ -176,32 +280,37 @@ class AttentionAdaptLayer(nn.Module):
                     tuple/list may be useful when we want to apply the adaptation
                       to both normal and skip connection at once
         """
-        out = []
+        outputs = []
         orig_type = type(main)
         is_tse = enroll is not None
 
         if not isinstance(main, tuple):
             main = (main, )
             enroll = (enroll, )
-
         for main0, enroll0 in zip(main, enroll):
-            # main (not dual-path): (..., time, nspk, hidden)
-            # main (dual-path): (..., chunk_size, num_chunk, nspk, hidden)
-            # enroll(..., hidden)
+            # non-dualpath case:
+            #   main: (..., time, nspk, hidden)
+            #   enroll: (..., time, hidden)
+            # dual-path case:
+            #   main: (..., chunk_size, num_chunk, nspk, hidden)
+            #   enroll: (..., chunk_size, num_chunk, hidden)
             if is_tse:
                 assert type(main0) == type(enroll0)
-                if enroll0.ndim == 2:
-                    enroll0 = enroll0[..., None, :]
+                # if enroll0.ndim == 2:
+                #     enroll0 = enroll0[..., None, :]
                 if self.is_dualpath_process:
                     batch, chunk_size, num_chunks, num_spk, hidden = main0.shape
                     mean_dim = (-3, -4)
-                    enroll0 = enroll0[..., None, :]
+                    enroll_mean_dim = (-2, -3)
+                    # enroll0 = enroll0[..., None, :]
                 else:
                     batch, time, num_spk, hidden = main0.shape
                     mean_dim = (-3, )
+                    enroll_mean_dim = (-2, )
                 s_v = self.mlp1(main0) # (..., nspk, hidden)
                 s_v2 = self.mlp2(main0).mean(dim=mean_dim, keepdim=True) # (..., nspk, hidden)
-                s_aux = self.mlp_aux(enroll0) # (..., n_enroll, 1, hidden)
+                # s_aux = self.mlp_aux(enroll0) # (..., n_enroll, 1, hidden)
+                s_aux = self.mlp_aux(enroll0).mean(dim=enroll_mean_dim)[..., None, :]
 
                 # e: [batch, chunk_size, num_chunk, n_enroll, nspk, hidden]
                 # a: [batch, chunk_size, num_chunk, n_enroll, nspk, 1]
@@ -211,7 +320,7 @@ class AttentionAdaptLayer(nn.Module):
                 e = e1[..., None, :, :] + e2[..., None, :, :] + e3[..., None, None, :, :, :] + self.b
                 e = self.w(self.attention_activation(e))
                 a = self.softmax(e*self.alpha)
-                main0 = (a * main0[..., None, :, :]).sum(dim=-2)[..., 0, :]
+                out = (a * main0[..., None, :, :]).sum(dim=-2)[..., 0, :]
             else:
                 if self.is_dualpath_process:
                     batch, chunk_size, num_chunks, num_spk, hidden = main0.shape
@@ -222,53 +331,10 @@ class AttentionAdaptLayer(nn.Module):
                     zeros = main0.new_zeros((batch, time, 1, 1, 1))
                     ones = main0.new_ones((batch, time, 1, 1, 1))
                 a = torch.cat((torch.cat((ones, zeros), dim=-2), torch.cat((zeros, ones), dim=-2)), dim=-3)
-                main0 = (a * main0[..., None, :, :]).sum(dim=-2)
-            out.append(main0)
-        return into_orig_type(tuple(out), orig_type)
-
-        '''
-        #  return main
-        out = []
-        orig_type = type(main)
-        is_tse = enroll is not None
-        assert is_tse, "currently we assume TSE task"
-
-        if not isinstance(main, tuple):
-            main = (main, )
-            enroll = (enroll, )
-
-        for main0, enroll0 in zip(main, enroll):
-            # main: (batch, nspk, hidden, time), enroll(batch, hidden)
-            print(main0.shape, enroll0.shape)
-            main0 = main0.transpose(-1, -2)
-            main0 = main0[..., None, :, :] if main0.ndim == 3 else main0
-            enroll0 = enroll0[..., None, :] if enroll0.ndim == 2 else enroll0
-            if is_tse:
-                # if behaving as TSE
-                assert type(main0) == type(enroll0)
-                s_v = self.mlp1(main0) # [B, I, T, F]
-                s_v2 = self.mlp2(main0).mean(dim=-2, keepdim=True) # [B, I, 1, F]
-                s_aux = self.mlp_aux(enroll0) # [B, S, 1, F]
-
-                # e: [B, S, I, T, F], a: [B, S, I, T, 1]
-                e1 = self.W_v(s_v)
-                e2 = self.W_iv(s_v2)
-                e3 = self.W_aux(s_aux)
-                e = e1[..., None, :, :, :] + e2[..., None, :, :, :] + e3[..., None, None, :]
-                e = self.w(self.attention_activation(e))
-                a = self.softmax(e*self.alpha)
-            # else:
-            #     # force the attention weights to have 0 and 1 for each speaker
-            #     B, I, T, F = Z.shape
-            #     zeros, ones = Z.new_zeros((B, 1, 1, T, 1)), Z.new_ones((B, 1, 1, T, 1))
-            #     a = torch.cat((torch.cat((ones, zeros), dim=2), torch.cat((zeros, ones), dim=2)), dim=1)
-            # attention
-            main0 = (a * main0[..., None, :, : ,:]).sum(dim=-3) # [B, S, T, F]
-            B, S, T, F = main0.shape
-            main0 = main0.reshape(-1, T, F).transpose(-1, -2)
-            out.append(main0)
-        return into_orig_type(tuple(out), orig_type)
-        '''
+                out = (a * main0[..., None, :, :]).sum(dim=-2)
+            outputs.append(out)
+        return into_orig_type(tuple(outputs), orig_type)
+'''
 
 # aliases for possible adaptation layer types
 adaptation_layer_types = {
