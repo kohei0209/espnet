@@ -16,6 +16,17 @@ from espnet2.train.abs_espnet_model import AbsESPnetModel
 EPS = torch.finfo(torch.get_default_dtype()).eps
 
 
+def normalization(speech_mix, speech_ref=None, eps=1e-8):
+    mean = speech_mix.mean(dim=-1, keepdim=True)
+    std = speech_mix.std(dim=-1, keepdim=True)
+    # standadization
+    speech_mix = (speech_mix - mean) / (std + eps)
+    if speech_ref is None:
+        return speech_mix, mean, std
+    else:
+        speech_ref = [(ref - mean) / (std + eps) for ref in speech_ref]
+        return speech_mix, speech_ref, mean, std
+
 class ESPnetExtractionEnhancementModel(AbsESPnetModel):
     """Target Speaker Extraction Frontend model"""
 
@@ -27,7 +38,8 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         loss_wrappers: List[AbsLossWrapper],
         num_spk: int = 1,
         share_encoder: bool = True,
-        task: str = "enh_tse"
+        task: str = "enh_tse",
+        normalization: bool = True,
     ):
         assert check_argument_types()
 
@@ -39,6 +51,7 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         # Whether to share encoder for both mixture and enrollment
         self.share_encoder = share_encoder
         self.num_spk = num_spk
+        self.normalization = normalization
 
         self.loss_wrappers = loss_wrappers
         names = [w.criterion.name for w in self.loss_wrappers]
@@ -96,7 +109,6 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         ]
         # remove dummy tensor with length of one
         speech_ref_len = len(speech_ref)
-        speech_ref_org = speech_ref
         speech_ref = [s for s in speech_ref if s.shape[-1]>1]
         for s in range(len(speech_ref), self.num_spk, 1):
             if "speech_ref{}".format(s + 1) in kwargs:
@@ -191,6 +203,7 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         ]
         assert len(speech_ref) == len(enroll_ref), (len(speech_ref), len(enroll_ref))
 
+        num_spk = len(speech_ref)
         import random
         if self.task == "tse":
             is_tse = True
@@ -199,21 +212,17 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         else: # randomly select TSE or Enhancement
             is_tse = random.random() > 0.5
         if is_tse:
-            # speech_ref, speech_lengths = [speech_ref[0]], [speech_lengths[0]]
             spk_idx = random.randint(0, len(speech_ref)-1)
             speech_ref = [speech_ref[spk_idx]]
             enroll_ref, enroll_ref_lengths = [enroll_ref[spk_idx]], [enroll_ref_lengths[spk_idx]]
-            # speech_ref = [s[0] for s in speech_ref]
-            # enroll_ref, enroll_ref_lengths = [s[0] for s in enroll_ref], [s[0] for s in enroll_ref_length]
         else:
             enroll_ref = None
 
         # model forward
         # num_spk = len(speech_ref) if self.training else None
-        num_spk = len(speech_ref)
-        # print(speech_ref[0].shape, len(speech_ref))
         speech_pre, feature_mix, feature_pre, others = self.forward_enhance(
-            speech_mix, speech_lengths, enroll_ref, enroll_ref_lengths, num_spk=num_spk, is_tse=is_tse
+            speech_mix, speech_lengths, enroll_ref, enroll_ref_lengths, num_spk=num_spk, is_tse=is_tse,
+            apply_normalization=self.normalization,
         )
 
         # loss computation
@@ -227,7 +236,7 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
             noise_ref,
             dereverb_speech_ref,
             num_spk=num_spk,
-            is_tse=is_tse
+            is_tse=is_tse,
         )
         return loss, stats, weight
 
@@ -239,7 +248,14 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         enroll_ref_lengths: torch.Tensor,
         num_spk: int = None,
         is_tse: bool = True,
+        apply_normalization: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+
+        if apply_normalization:
+            speech_mix, mean, std = normalization(speech_mix)
+            if is_tse:
+                enroll_ref = [normalization(enroll_ref[spk])[0] for spk in range(len(enroll_ref))]
+
         feature_mix, flens = self.encoder(speech_mix, speech_lengths)
 
         # is_tse = enroll_ref is not None
@@ -293,6 +309,8 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                 # some models (e.g. neural beamformer trained with mask loss)
                 # do not predict time-domain signal in the training stage
                 speech_pre = None
+        if apply_normalization:
+            speech_pre = [(pre + mean) * std for pre in speech_pre]
         return speech_pre, feature_mix, feature_pre, others
 
     def forward_loss(
@@ -314,6 +332,7 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         o = {}
         perm = None
         if is_tse:
+            assert len(speech_pre) == len(speech_ref) == 1, "TSE should output only 1 source"
             for loss_wrapper in self.loss_wrappers:
                 criterion = loss_wrapper.criterion
                 if getattr(criterion, "only_for_test", False) and self.training:
@@ -356,7 +375,12 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
 
                 if perm is None and "perm" in o:
                     perm = o["perm"]
-            stats[f"tse_{num_spk}spk_loss"] = loss
+            stats[f"tse_{num_spk}spk_loss"] = loss.detach()
+            # for n in range(self.num_spk):
+            #     if n == num_spk:
+            #         stats[f"tse_{num_spk}spk_loss"] = loss.detach()
+            #     else:
+            #         stats[f"tse_{n}spk_loss"] = None
         else:
             # for calculating loss on estimated noise signals
             if getattr(self.extractor, "predict_noise", False):
@@ -475,19 +499,27 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                     perm = o["perm"]
 
             # register loss value
-            stats[f"enh_{num_spk}spk_loss"] = loss.detach()
+            stats[f"enh_{num_spk}spk_loss"] = loss.clone().detach()
+            # for n in range(self.num_spk):
+            #     if n == num_spk:
+            #         stats[f"enh_{num_spk}spk_loss"] = loss.detach()
+            #     else:
+            #         stats[f"enh_{n}spk_loss"] = None
             # compute EDA counting loss
             if "existance_probability" in others:
                 import torch
-                bce = torch.nn.BCELoss(reduction="sum")
+                bce = torch.nn.BCELoss(reduction="none")
                 exist, non_exist = others["existance_probability"][..., :num_spk], others["existance_probability"][..., num_spk]
-                bce_loss_exist = bce(exist, torch.ones_like(exist))
+                bce_loss_exist = bce(exist, torch.ones_like(exist)).sum(dim=-1)
                 bce_loss_non_exist = bce(non_exist, torch.zeros_like(non_exist))
-                bce_loss = (bce_loss_exist + bce_loss_non_exist) / (num_spk + 1)
-                loss += bce_loss
+                # bce_loss_non_exist = bce(non_exist, torch.ones_like(non_exist)) # miss
+                bce_loss = ((bce_loss_exist + bce_loss_non_exist) / (num_spk + 1)).mean()
+                loss += 1 * bce_loss
                 stats["attractor_loss"] = bce_loss.detach()
-                stats["attractor_loss_exist"] = bce_loss_exist.detach()
-                stats["attractor_loss_nonexist"] = bce_loss_non_exist.detach()
+                stats["attractor_loss_exist"] = bce_loss_exist.mean().detach()
+                stats["attractor_loss_nonexist"] = bce_loss_non_exist.mean().detach()
+                stats["attractor_exist_prob"] = others["existance_probability"][..., :num_spk].mean().detach()
+                stats["attractor_nonexist_prob"] = others["existance_probability"][..., num_spk].mean().detach()
 
         if self.training and isinstance(loss, float):
             raise AttributeError(
