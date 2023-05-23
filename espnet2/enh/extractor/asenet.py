@@ -59,6 +59,7 @@ class ASENet(AbsExtractor, AbsSeparator):
             hidden_dim,
             num_layers=1,
             bidirectional=True,
+            batch_first=True,
         )
         self.linear1 = nn.Linear(hidden_dim*2, hidden_dim)
         self.separator_linear1 = nn.Linear(hidden_dim, hidden_dim)
@@ -71,6 +72,7 @@ class ASENet(AbsExtractor, AbsSeparator):
             num_layers=1,
             dropout=dropout_p,
             bidirectional=True,
+            batch_first=True,
         )
         self.linear2 = nn.Linear(hidden_dim*2, hidden_dim)
         self.lstm3 = nn.LSTM(
@@ -79,6 +81,7 @@ class ASENet(AbsExtractor, AbsSeparator):
             num_layers=1,
             dropout=dropout_p,
             bidirectional=True,
+            batch_first=True,
         )
         self.linear3 = nn.Sequential(
             nn.Linear(hidden_dim*2, hidden_dim),
