@@ -34,19 +34,25 @@ if __name__ == "__main__":
         "audio_paths",
         type=str,
         nargs="+",
-        help="Paths to Librispeech subsets",
+        help="Paths to WSJ subsets",
     )
     parser.add_argument(
-        "--outfile",
+        "--output_dir",
+        type=Path,
+        help="Path to the output spk2utt json file",
+    )
+    parser.add_argument(
+        "--outfile_prefix",
         type=str,
-        default="spk2utt_tse.json",
+        default="spk2enroll.json",
         help="Path to the output spk2utt json file",
     )
     parser.add_argument("--audio_format", type=str, default="wav")
     args = parser.parse_args()
 
     spk2utt = get_spk2utt(args.audio_paths, audio_format=args.audio_format)
-    outfile = Path(args.outfile)
+    # outfile = Path(args.outfile)
+    outfile = args.output_dir / args.outfile_prefix
     outfile.parent.mkdir(parents=True, exist_ok=True)
     with outfile.open("w", encoding="utf-8") as f:
         json.dump(spk2utt, f)
