@@ -745,15 +745,14 @@ class EncoderDecoderAttractor(nn.Module):
         _, state = self.lstm_encoder(output)
         zero_input = input.new_zeros((batch_size, 1, H))
         outputs, existence_probabilities = [], []
-        assert num_spk is not None, "currently, num_spk should be specified even in validation"
         # estimate the number of speakers (inference)
         if num_spk is None:
             assert batch_size == 1, "We don't support batched computation in inference"
             existence_probability = 1
             while existence_probability > 0.5:
                 output, state = self.lstm_decoder(zero_input, state)
-                existence_probability = self.attractor_existence_estimator(output).mean()
-                existence_probabilities.append(existence_probability)
+                existence_probability = self.attractor_existence_estimator(output)
+                existence_probabilities.append(existence_probability[..., 0])
                 outputs.append(output[..., 0, :])
         # number of speakers is given (training)
         else:
