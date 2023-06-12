@@ -1329,7 +1329,6 @@ class AbsTask(ABC):
                 except wandb.errors.UsageError:
                     logging.info("wandb not configured! run `wandb login` to enable")
                     args.use_wandb = False
-
             if args.use_wandb:
                 if (
                     not distributed_option.distributed
@@ -1353,7 +1352,7 @@ class AbsTask(ABC):
                         id=args.wandb_id,
                         resume=args.resume,
                     )
-                    wandb.config.update(args)
+                    wandb.config.update(args, allow_val_change=True)
                 else:
                     # wandb also supports grouping for distributed training,
                     # but we only logs aggregated data,
@@ -1550,7 +1549,6 @@ class AbsTask(ABC):
                     "utt2category",
                 )
             )
-            # logging.warning("Reading " + utt2category_file)
             logging.info("\n\nReading " + utt2category_file)
         else:
             logging.info("\n\nNOT Reading " + utt2category_file)
@@ -1615,22 +1613,6 @@ class AbsTask(ABC):
     ) -> AbsIterFactory:
         assert check_argument_types()
 
-        if Path(
-            Path(iter_options.data_path_and_name_and_type[0][0]).parent, "utt2category"
-        ).exists():
-            utt2category_file = str(
-                Path(
-                    Path(iter_options.data_path_and_name_and_type[0][0]).parent,
-                    "utt2category",
-                )
-            )
-            # logging.warning("\n\nReading " + utt2category_file)
-            logging.info("\n\nReading " + utt2category_file)
-        else:
-            logging.info("\n\nNot Reading utt2category")
-            utt2category_file = None
-        utt2category_file = None
-
         dataset = ESPnetDataset(
             iter_options.data_path_and_name_and_type,
             float_dtype=args.train_dtype,
@@ -1649,7 +1631,6 @@ class AbsTask(ABC):
 
         batch_sampler = UnsortedBatchSampler(
             batch_size=1, key_file=key_file,
-            utt2category_file=utt2category_file,
         )
         batches = list(batch_sampler)
         if iter_options.num_batches is not None:

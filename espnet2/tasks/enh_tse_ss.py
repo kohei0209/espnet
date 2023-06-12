@@ -12,6 +12,8 @@ from espnet2.enh.extractor.abs_extractor import AbsExtractor
 from espnet2.enh.extractor.td_speakerbeam_extractor import TDSpeakerBeamExtractor
 from espnet2.enh.extractor.td_speakerbeam_hybrid_extractor import TDSpeakerBeamExtractorWithAttention
 from espnet2.enh.extractor.td_dprnn_eda_extractor import DPRNNEDAExtractor
+from espnet2.enh.extractor.sepformer_extractor import SepformerEDAExtractor
+from espnet2.enh.extractor.dptnet_eda_extractor import DPTNetEDAExtractor
 from espnet2.enh.extractor.asenet import ASENet
 from espnet2.tasks.abs_task import AbsTask
 from espnet2.tasks.enh import (
@@ -37,6 +39,7 @@ from espnet2.train.distributed_utils import (
     get_num_nodes,
     resolve_distributed_mode,
 )
+from espnet2.samplers.unsorted_batch_sampler import UnsortedBatchSampler
 from espnet2.tasks.abs_task import IteratorOptions
 from espnet2.iterators.abs_iter_factory import AbsIterFactory
 from espnet2.iterators.chunk_iter_factory import ChunkIterFactory
@@ -52,6 +55,8 @@ extractor_choices = ClassChoices(
         td_speakerbeam_with_attention=TDSpeakerBeamExtractorWithAttention,
         td_dprnn_eda=DPRNNEDAExtractor,
         asenet=ASENet,
+        sepformer_eda=SepformerEDAExtractor,
+        dptnet_eda=DPTNetEDAExtractor,
     ),
     type_check=AbsExtractor,
     default="td_speakerbeam",
@@ -336,6 +341,97 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             train=train,
         )
 
+
+    @classmethod
+    def build_chunk_iter_factory(
+        cls,
+        args: argparse.Namespace,
+        iter_options: IteratorOptions,
+        mode: str,
+    ) -> AbsIterFactory:
+        assert check_argument_types()
+
+        dataset = ESPnetDataset(
+            iter_options.data_path_and_name_and_type,
+            float_dtype=args.train_dtype,
+            preprocess=iter_options.preprocess_fn,
+            max_cache_size=iter_options.max_cache_size,
+            max_cache_fd=iter_options.max_cache_fd,
+        )
+        cls.check_task_requirements(
+            dataset, args.allow_variable_data_keys, train=iter_options.train
+        )
+
+        if len(iter_options.shape_files) == 0:
+            key_file = iter_options.data_path_and_name_and_type[0][0]
+        else:
+            key_file = iter_options.shape_files[0]
+
+        batch_sampler = UnsortedBatchSampler(
+            batch_size=1, key_file=key_file,
+            # utt2category_file=utt2category_file,
+        )
+        batches = list(batch_sampler)
+
+        # use only N-mix data if specified
+        if args.n_mix is not None and mode != "plot_att":
+            assert isinstance(args.n_mix, list)
+            logging.info("Remove unspecified data")
+            num_batches_before = len(batches)
+            new_batches = []
+            logging.info(args.n_mix)
+            for batch in batches:
+                if int(batch[0][0]) in args.n_mix:
+                    new_batches.append(batch)
+            batches = new_batches
+            num_batches_after = len(batches)
+            logging.info(f"Original batches: {num_batches_before}, Current batches: {num_batches_after}")
+        if iter_options.num_batches is not None:
+            batches = batches[: iter_options.num_batches]
+        logging.info(f"[{mode}] dataset:\n{dataset}")
+
+        if iter_options.distributed:
+            world_size = torch.distributed.get_world_size()
+            rank = torch.distributed.get_rank()
+            if len(batches) < world_size:
+                raise RuntimeError("Number of samples is smaller than world_size")
+            if iter_options.batch_size < world_size:
+                raise RuntimeError("batch_size must be equal or more than world_size")
+
+            if rank < iter_options.batch_size % world_size:
+                batch_size = iter_options.batch_size // world_size + 1
+            else:
+                batch_size = iter_options.batch_size // world_size
+            num_cache_chunks = args.num_cache_chunks // world_size
+            # NOTE(kamo): Split whole corpus by sample numbers without considering
+            #   each of the lengths, therefore the number of iteration counts are not
+            #   always equal to each other and the iterations are limitted
+            #   by the fewest iterations.
+            #   i.e. the samples over the counts are discarded.
+            batches = batches[rank::world_size]
+        else:
+            batch_size = iter_options.batch_size
+            num_cache_chunks = args.num_cache_chunks
+
+        return ChunkIterFactory(
+            dataset=dataset,
+            batches=batches,
+            seed=args.seed,
+            batch_size=batch_size,
+            # For chunk iterator,
+            # --num_iters_per_epoch doesn't indicate the number of iterations,
+            # but indicates the number of samples.
+            num_samples_per_epoch=iter_options.num_iters_per_epoch,
+            shuffle=iter_options.train,
+            num_workers=args.num_workers,
+            collate_fn=iter_options.collate_fn,
+            pin_memory=args.ngpu > 0,
+            chunk_length=args.chunk_length,
+            chunk_shift_ratio=args.chunk_shift_ratio,
+            num_cache_chunks=num_cache_chunks,
+            excluded_key_prefixes=args.chunk_excluded_key_prefixes,
+        )
+
     @classmethod
     def build_sequence_iter_factory(
         cls, args: argparse.Namespace, iter_options: IteratorOptions, mode: str
@@ -386,7 +482,7 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
         batches = list(batch_sampler)
         if iter_options.num_batches is not None:
             batches = batches[: iter_options.num_batches]
-        if args.n_mix is not None:
+        if args.n_mix is not None and mode != "plot_att":
             assert isinstance(args.n_mix, list)
             logging.info("Remove unspecified data")
             num_batches_before = len(batches)

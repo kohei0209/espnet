@@ -54,6 +54,7 @@ from espnet2.enh.separator.dpcl_separator import DPCLSeparator
 from espnet2.enh.separator.dprnn_separator import DPRNNSeparator
 from espnet2.enh.separator.dprnn_eda_separator import DPRNNEDASeparator
 from espnet2.enh.separator.dptnet_separator import DPTNetSeparator
+from espnet2.enh.separator.sepformer_separator import SepformerSeparator
 from espnet2.enh.separator.fasnet_separator import FaSNetSeparator
 from espnet2.enh.separator.ineube_separator import iNeuBe
 from espnet2.enh.separator.neural_beamformer import NeuralBeamformer
@@ -111,6 +112,7 @@ separator_choices = ClassChoices(
         tfgridnet=TFGridNet,
         asenet=ASENet,
         td_speakerbeam_with_attention=TDSpeakerBeamExtractorWithAttention,
+        sepformer=SepformerSeparator,
     ),
     type_check=AbsSeparator,
     default="rnn",
@@ -171,7 +173,7 @@ preprocessor_choices = ClassChoices(
         enh=EnhPreprocessor,
     ),
     type_check=AbsPreprocessor,
-    default="enh_text",
+    default="enh",
     # default=None,
 )
 
@@ -403,41 +405,6 @@ class EnhancementTask(AbsTask):
                 else:
                     retval = None
             elif args.preprocessor == "enh":
-                retval = preprocessor_choices.get_class(args.preprocessor)(
-                    train=train,
-                    # NOTE(kamo): Check attribute existence for backward compatibility
-                    rir_scp=args.rir_scp if hasattr(args, "rir_scp") else None,
-                    rir_apply_prob=args.rir_apply_prob
-                    if hasattr(args, "rir_apply_prob")
-                    else 1.0,
-                    noise_scp=args.noise_scp if hasattr(args, "noise_scp") else None,
-                    noise_apply_prob=args.noise_apply_prob
-                    if hasattr(args, "noise_apply_prob")
-                    else 1.0,
-                    noise_db_range=args.noise_db_range
-                    if hasattr(args, "noise_db_range")
-                    else "13_15",
-                    short_noise_thres=args.short_noise_thres
-                    if hasattr(args, "short_noise_thres")
-                    else 0.5,
-                    speech_volume_normalize=args.speech_volume_normalize
-                    if hasattr(args, "speech_volume_normalize")
-                    else None,
-                    use_reverberant_ref=args.use_reverberant_ref
-                    if hasattr(args, "use_reverberant_ref")
-                    else None,
-                    num_spk=args.num_spk if hasattr(args, "num_spk") else 1,
-                    num_noise_type=args.num_noise_type
-                    if hasattr(args, "num_noise_type")
-                    else 1,
-                    sample_rate=args.sample_rate
-                    if hasattr(args, "sample_rate")
-                    else 8000,
-                    force_single_channel=args.force_single_channel
-                    if hasattr(args, "force_single_channel")
-                    else False,
-                )
-            elif args.preprocessor == "enh_text":
                 retval = preprocessor_choices.get_class(args.preprocessor)(
                     train=train,
                     # NOTE(kamo): Check attribute existence for backward compatibility
