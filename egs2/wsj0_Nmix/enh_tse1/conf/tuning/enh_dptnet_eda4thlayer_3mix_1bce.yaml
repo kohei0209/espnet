@@ -1,21 +1,22 @@
 optim: adam
-max_epoch: 200
+max_epoch: 175
 batch_type: folded
-batch_size: 32
-valid_batch_size: 8
+sort_batch: descending
+batch_size: 4
+valid_batch_size: 2
 iterator_type: sequence
 chunk_length: 32000
-n_mix:
-    - 2
 # exclude keys "enroll_ref", "enroll_ref1", "enroll_ref2", ...
 # from the length consistency check in ChunkIterFactory
 chunk_excluded_key_prefixes:
 - "enroll_ref"
 - "utt2category"
 # - "speech_ref"
+n_mix:
+- 3
 num_workers: 8
 optim_conf:
-    lr: 2.0e-04
+    lr: 4.0e-04
     eps: 1.0e-08
     weight_decay: 0
 unused_parameters: true
@@ -32,15 +33,18 @@ best_model_criterion:
 -   - valid
     - loss
     - min
-keep_nbest_models: 1
-scheduler: reducelronplateau
+keep_nbest_models: 10
+scheduler: warmupsteplr
 scheduler_conf:
-   mode: min
-   factor: 0.7
-   patience: 5
+   # for WarmupLR
+   warmup_steps: 20000
+   # for StepLR
+   steps_per_epoch: 20120
+   step_size: 2
+   gamma: 0.98
 
 model_conf:
-    num_spk: 2
+    num_spk: 5
     share_encoder: true
     task: enh
     normalization: true
@@ -50,21 +54,34 @@ enroll_segment: 32000
 load_spk_embedding: false
 load_all_speakers: true
 
-encoder: stft
+encoder: conv
 encoder_conf:
-    n_fft: 512
-    hop_length: 128
-decoder: stft
+    channel: 64
+    kernel_size: 16
+    stride: 8
+decoder: conv
 decoder_conf:
-    n_fft: 512
-    hop_length: 128
-extractor: asenet
+    channel: 64
+    kernel_size: 16
+    stride: 8
+extractor: dptnet_eda
 extractor_conf:
-    num_spk: 2
-    hidden_dim: 512
-    attention_dim: 200
-    dropout_p: 0.3
-    adapt_enroll_dim: 257
+    num_spk: 5
+    layer: 6
+    rnn_type: lstm
+    bidirectional: True  # this is for the inter-block rnn
+    unit: 128
+    segment_size: 100
+    att_heads: 4
+    dropout: 0
+    activation: relu
+    norm_type: gLN
+    nonlinear: prelu
+    triple_path: false
+    i_eda_layer: 3
+    i_adapt_layer: null
+    adapt_layer_type: attn
+    adapt_enroll_dim: 64
 
 # A list for criterions
 # The overlall loss in the multi-task learning will be:
@@ -72,13 +89,14 @@ extractor_conf:
 # The default `weight` for each sub-loss is 1.0
 criterions:
   # The first criterion
-  - name: snr
+  - name: si_snr
     conf:
       eps: 1.0e-7
     wrapper: pit
     wrapper_conf:
       weight: 1.0
+      independent_perm: true
 
 use_wandb: true
 wandb_project: use_preliminary_wsj
-wandb_name: ASENet_Sep_2mix
+wandb_name: DPTNet_Sep_EDA4thLayer_3mix_1BCELoss

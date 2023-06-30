@@ -1,70 +1,83 @@
 optim: adam
+init: none
 max_epoch: 200
 batch_type: folded
-batch_size: 32
-valid_batch_size: 8
+batch_size: 16 # batch_size 4 can be trained on 4 RTX 2080ti GPUs
+valid_batch_size: 1
 iterator_type: sequence
 chunk_length: 32000
 n_mix:
     - 2
+# num_iters_valid: 5000
 # exclude keys "enroll_ref", "enroll_ref1", "enroll_ref2", ...
 # from the length consistency check in ChunkIterFactory
 chunk_excluded_key_prefixes:
 - "enroll_ref"
-- "utt2category"
-# - "speech_ref"
-num_workers: 8
+num_workers: 4
+unused_parameters: true
+grad_clip: 5
 optim_conf:
-    lr: 2.0e-04
+    lr: 4.0e-04
     eps: 1.0e-08
     weight_decay: 0
-unused_parameters: true
-patience: 20
-accum_grad: 1
-grad_clip: 5.0
+patience: 10
 val_scheduler_criterion:
 - valid
 - loss
 best_model_criterion:
 -   - valid
-    - snr
+    - si_snr
     - max
 -   - valid
     - loss
     - min
 keep_nbest_models: 1
-scheduler: reducelronplateau
+scheduler: warmupsteplr
 scheduler_conf:
-   mode: min
-   factor: 0.7
-   patience: 5
+   # for WarmupLR
+   warmup_steps: 4000
+   # for StepLR
+   steps_per_epoch: 5000
+   step_size: 2
+   gamma: 0.98
+
 
 model_conf:
-    num_spk: 2
-    share_encoder: true
-    task: enh
-    normalization: true
+  num_spk: 2
+  share_encoder: true
+  task: enh
 
 train_spk2enroll: data/tr_min_8k/spk2enroll.json
 enroll_segment: 32000
 load_spk_embedding: false
 load_all_speakers: true
 
-encoder: stft
+encoder: conv
 encoder_conf:
-    n_fft: 512
-    hop_length: 128
-decoder: stft
+    channel: 256
+    kernel_size: 16
+    stride: 8
+decoder: conv
 decoder_conf:
-    n_fft: 512
-    hop_length: 128
-extractor: asenet
+    channel: 256
+    kernel_size: 16
+    stride: 8
+extractor: sepformer_eda
 extractor_conf:
     num_spk: 2
-    hidden_dim: 512
-    attention_dim: 200
-    dropout_p: 0.3
-    adapt_enroll_dim: 257
+    output_dim: 512
+    intra_layer_before_eda: 4
+    inter_layer_before_eda: 4
+    intra_layer_after_eda: 0
+    inter_layer_after_eda: 0
+    channel_layer: 0
+    unit: 2048
+    att_heads: 8
+    dropout: 0.0
+    activation: relu
+    norm_type: gLN
+    segment_size: 100
+    nonlinear: relu
 
 # A list for criterions
 # The overlall loss in the multi-task learning will be:
@@ -78,7 +91,9 @@ criterions:
     wrapper: pit
     wrapper_conf:
       weight: 1.0
+      independent_perm: True
+
 
 use_wandb: true
 wandb_project: use_preliminary_wsj
-wandb_name: ASENet_Sep_2mix
+wandb_name: Sepformer_Sep_woEDA_warmup
