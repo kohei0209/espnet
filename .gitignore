@@ -89,3 +89,6 @@ tools/ice-g2p*
 tools/fairseq*
 tools/featbin*
 tools/miniconda
+
+mywork/
+*.onnx
