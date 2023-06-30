@@ -47,7 +47,8 @@ if V(torch.__version__) >= V("1.6.0"):
         and torch.cuda.is_available()
         and torch.cuda.is_bf16_supported()
     ):
-        autocast_args = dict(dtype=torch.bfloat16)
+        # autocast_args = dict(dtype=torch.bfloat16)
+        autocast_args = dict(dtype=torch.float16)
 else:
     # Nothing to do if torch<1.6.0
     @contextmanager
@@ -143,7 +144,7 @@ class Trainer:
             checkpoint,
             map_location=f"cuda:{torch.cuda.current_device()}" if ngpu > 0 else "cpu",
         )
-        model.load_state_dict(states["model"])
+        model.load_state_dict(states["model"], strict=False)
         reporter.load_state_dict(states["reporter"])
         for optimizer, state in zip(optimizers, states["optimizers"]):
             optimizer.load_state_dict(state)
@@ -198,7 +199,7 @@ class Trainer:
                     )
                 scaler = fairscale.optim.grad_scaler.ShardedGradScaler()
             else:
-                scaler = GradScaler()
+                scaler = GradScaler(init_scale=1280.0)
         else:
             scaler = None
 
