@@ -4,6 +4,9 @@
 #            2020  Shanghai Jiao Tong University (Authors: Wangyou Zhang)
 # Apache 2.0
 
+min_or_max=min
+sample_rate=8k
+
 . utils/parse_options.sh
 
 if [ $# -ne 6 ]; then
@@ -31,7 +34,9 @@ output_dir=$6
 
 echo "Creating scp files."
 
-python_cmd="python generate_wsj_scp.py -p ${wsj_full_wav} -o ${wsj_mix_wav} -n ${nsrc} -sr 8000 --len_mode min --scp_output_dir ${output_dir}"
+sample_rate_int=${sample_rate%"k"}
+sample_rate_int=$((sample_rate_int * 1000))
+python_cmd="python generate_wsj_scp.py -p ${wsj_full_wav} -o ${wsj_mix_wav} -n ${nsrc} -sr ${sample_rate_int} --len_mode ${min_or_max} --scp_output_dir ${output_dir}"
 
 mixfile=${dir}/mix_python.sh
 echo "#!/usr/bin/env bash" > $mixfile
@@ -39,8 +44,4 @@ echo "cd ${dir}" >> $mixfile
 echo $python_cmd >> $mixfile
 chmod +x $mixfile
 
-# Run python
-# (This may take ~6 hours to generate both min and max versions
-#  on Intel(R) Xeon(R) CPU E5-2620 v4 @ 2.10GHz)
-echo "Log is in ${dir}/mix.log"
 $train_cmd ${dir}/mix.log $mixfile

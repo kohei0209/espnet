@@ -33,20 +33,20 @@ cv="cv_${min_or_max}_${sample_rate}"
 tt="tt_${min_or_max}_${sample_rate}"
 
 # check if the wav dir exists.
-# for f in $wavdir/tr $wavdir/cv $wavdir/tt; do
-#   if [ ! -d $wavdir ]; then
-#     echo "Error: $wavdir is not a directory."
-#     exit 1;
-#   fi
-# done
+for f in $wavdir/tr $wavdir/cv $wavdir/tt; do
+  if [ ! -d $wavdir ]; then
+    echo "Error: $wavdir is not a directory."
+    exit 1;
+  fi
+done
 
 # check if the script file exists.
-# for f in $srcdir/mix_2_spk_${min_or_max}_tr_mix $srcdir/mix_2_spk_${min_or_max}_cv_mix $srcdir/mix_2_spk_${min_or_max}_tt_mix; do
-#   if [ ! -f $f ]; then
-#     echo "Could not find $f.";
-#     exit 1;
-#   fi
-# done
+for f in $srcdir/mix_2_spk_${min_or_max}_tr_mix $srcdir/mix_2_spk_${min_or_max}_cv_mix $srcdir/mix_2_spk_${min_or_max}_tt_mix; do
+  if [ ! -f $f ]; then
+    echo "Could not find $f.";
+    exit 1;
+  fi
+done
 
 data=./data
 
@@ -55,8 +55,10 @@ for x in tr cv tt; do
   sort ${data}/${target_folder}/wav_org.scp > ${data}/${target_folder}/wav.scp
   for n_src in 1 2 3 4 5; do
     sort ${data}/${target_folder}/spk${n_src}_org.scp > ${data}/${target_folder}/spk${n_src}.scp
+    rm ${data}/${target_folder}/spk${n_src}_org.scp
   done
   sort -k1 -u ${data}/${target_folder}/utt2spk_org > ${data}/${target_folder}/utt2spk
+  rm ${data}/${target_folder}/utt2spk_org
   utt2spk_to_spk2utt.pl ${data}/${target_folder}/utt2spk > ${data}/${target_folder}/spk2utt
 done
 

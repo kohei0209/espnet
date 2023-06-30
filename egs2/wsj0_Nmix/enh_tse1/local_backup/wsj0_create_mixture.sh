@@ -36,13 +36,13 @@ mkdir -p ${dir}
 git clone https://github.com/mpariente/pywsj0-mix.git ${dir}
 
 
-# echo "WSJ0 wav file."
-# local/convert2wav.sh ${wsj0_path} ${wsj_full_wav} || exit 1;
+echo "WSJ0 wav file."
+local/convert2wav.sh ${wsj0_path} ${wsj_full_wav} || exit 1;
 
 echo "Creating ${nsrc}-speaker mixtures"
 
 sample_rate_int=${sample_rate%"k"}
-sample_rate_int=$((sample_rate_int * 1000))
+sample_rate_int=$((sample_rate * 1000))
 python_cmd="python generate_wsjmix.py -p ${wsj_full_wav} -o ${wsj_mix_wav} -n ${nsrc} -sr ${sample_rate_int} --len_mode ${min_or_max}"
 
 mixfile=${dir}/mix_python.sh

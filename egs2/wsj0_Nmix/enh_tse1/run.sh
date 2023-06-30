@@ -13,11 +13,11 @@ train_set="tr_${min_or_max}_${sample_rate}"
 valid_set="cv_${min_or_max}_${sample_rate}"
 test_sets="tt_${min_or_max}_${sample_rate} "
 
-config=./conf/tuning/train_enh_dprnn_tasnet.yaml
+config=./conf/tuning/train_enh_trial.yaml
 
 ./enh2.sh \
-    --is_tse_task true \
-    --is_tse_and_ss_task false \
+    --is_tse_task false \
+    --is_tse_and_ss_task true \
     --train_set "${train_set}" \
     --valid_set "${valid_set}" \
     --test_sets "${test_sets}" \

@@ -9,7 +9,7 @@ sample_rate=8k
 
 . utils/parse_options.sh
 
-if [ $# -ne 5 ]; then
+if [ $# -ne 6 ]; then
   echo "Usage: $0 <dir> <wsj0-path> <wsj0-full-wav> <wsj0-2mix-wav>"
   echo " where <dir> is download space,"
   echo " <wsj0-path> is the original wsj0 path"
@@ -29,21 +29,14 @@ wsj0_path=$2
 wsj_full_wav=$3
 wsj_mix_wav=$4
 nsrc=$5
-
-echo "Downloading WSJ0_mixture scripts."
-mkdir -p ${dir}
-
-git clone https://github.com/mpariente/pywsj0-mix.git ${dir}
+output_dir=$6
 
 
-# echo "WSJ0 wav file."
-# local/convert2wav.sh ${wsj0_path} ${wsj_full_wav} || exit 1;
-
-echo "Creating ${nsrc}-speaker mixtures"
+echo "Creating scp files."
 
 sample_rate_int=${sample_rate%"k"}
-sample_rate_int=$((sample_rate_int * 1000))
-python_cmd="python generate_wsjmix.py -p ${wsj_full_wav} -o ${wsj_mix_wav} -n ${nsrc} -sr ${sample_rate_int} --len_mode ${min_or_max}"
+sample_rate_int=$((sample_rate * 1000))
+python_cmd="python generate_wsj_scp.py -p ${wsj_full_wav} -o ${wsj_mix_wav} -n ${nsrc} -sr ${sample_rate_int} --len_mode ${min_or_max} --scp_output_dir ${output_dir}"
 
 mixfile=${dir}/mix_python.sh
 echo "#!/usr/bin/env bash" > $mixfile
