@@ -12,7 +12,8 @@ from espnet2.samplers.abs_sampler import AbsSampler
 
 def worker_init_fn(worker_id, base_seed=0):
     """Set random seed for each worker in DataLoader."""
-    seed = base_seed + worker_id
+    # seed = base_seed + worker_id
+    seed = base_seed
     random.seed(seed)
     np.random.seed(seed)
 

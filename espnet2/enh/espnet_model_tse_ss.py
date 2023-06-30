@@ -234,7 +234,6 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
             else:
                 speech_ref_tmp = speech_ref
                 enroll_ref_tmp, enroll_ref_lengths_tmp = None, None
-
             speech_pre, feature_mix, feature_pre, others = self.forward_enhance(
                 speech_mix, speech_lengths, enroll_ref_tmp, enroll_ref_lengths_tmp, num_spk=num_spk,
                 is_tse=is_tse, apply_normalization=self.normalization,
@@ -321,6 +320,13 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                     ]
                 else:
                     speech_pre = [self.decoder(ps, speech_lengths)[0] for ps in feature_pre]
+                    # when using float16, istft returns complex32, maybe bug?
+                    for s in range(len(speech_pre)):
+                        # print(speech_pre[s].dtype)
+                        # print(abs(s.real).sum(), abs(s.imag).sum())
+                        from espnet2.enh.layers.complex_utils import is_complex
+                        if is_complex(speech_pre[s]):
+                            speech_pre[s] = speech_pre[s].to(torch.float16)
             else:
                 # some models (e.g. neural beamformer trained with mask loss)
                 # do not predict time-domain signal in the training stage
@@ -392,7 +398,7 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                 if perm is None and "perm" in o:
                     perm = o["perm"]
             # register loss value
-            for n in range(2, self.num_spk+1):
+            for n in range(1, self.num_spk+1):
                 if n == num_spk:
                     stats[f"tse_{num_spk}spk_loss"] = loss.clone().detach()
                 else:
@@ -515,24 +521,27 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                     perm = o["perm"]
 
             # register loss value
-            for n in range(2, self.num_spk+1):
+            for n in range(1, self.num_spk+1):
                 if n == num_spk:
                     stats[f"enh_{num_spk}spk_loss"] = loss.clone().detach()
                 else:
                     stats[f"enh_{n}spk_loss"] = torch.nan
             # compute EDA counting loss
             if "existance_probability" in others:
-                bce = torch.nn.BCELoss(reduction="none")
-                exist, non_exist = others["existance_probability"][..., :num_spk], others["existance_probability"][..., num_spk]
-                bce_loss_exist = bce(exist, torch.ones_like(exist)).sum(dim=-1)
-                bce_loss_non_exist = bce(non_exist, torch.zeros_like(non_exist))
-                bce_loss = ((bce_loss_exist + bce_loss_non_exist) / (num_spk + 1)).mean()
-                loss += 10 * bce_loss
-                stats["attractor_loss"] = bce_loss.detach()
-                stats["attractor_loss_exist"] = bce_loss_exist.mean().detach()
-                stats["attractor_loss_nonexist"] = bce_loss_non_exist.mean().detach()
-                stats["attractor_exist_prob"] = others["existance_probability"][..., :num_spk].mean().detach()
-                stats["attractor_nonexist_prob"] = others["existance_probability"][..., num_spk].mean().detach()
+                with torch.cuda.amp.autocast(enabled=False):
+                    others["existance_probability"] = others["existance_probability"].to(torch.float32)
+                    bce = torch.nn.BCELoss(reduction="none")
+                    # bce = torch.nn.BCEWithLogitsLoss(reduction="none")
+                    exist, non_exist = others["existance_probability"][..., :num_spk], others["existance_probability"][..., num_spk]
+                    bce_loss_exist = bce(exist, torch.ones_like(exist)).sum(dim=-1)
+                    bce_loss_non_exist = bce(non_exist, torch.zeros_like(non_exist))
+                    bce_loss = ((bce_loss_exist + bce_loss_non_exist) / (num_spk + 1)).mean()
+                    loss += 1 * bce_loss
+                    stats["attractor_loss"] = bce_loss.detach()
+                    stats["attractor_loss_exist"] = bce_loss_exist.mean().detach()
+                    stats["attractor_loss_nonexist"] = bce_loss_non_exist.mean().detach()
+                    stats["attractor_exist_prob"] = others["existance_probability"][..., :num_spk].mean().detach()
+                    stats["attractor_nonexist_prob"] = others["existance_probability"][..., num_spk].mean().detach()
 
         if self.training and isinstance(loss, float):
             raise AttributeError(

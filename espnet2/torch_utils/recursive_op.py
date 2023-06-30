@@ -1,5 +1,6 @@
 """Torch utility module."""
 import torch
+from espnet2.train.distributed_utils import get_world_size
 
 if torch.distributed.is_available():
     from torch.distributed import ReduceOp
@@ -15,7 +16,14 @@ def recursive_sum(obj, weight: torch.Tensor, distributed: bool = False):
         assert obj.size() == weight.size(), (obj.size(), weight.size())
         obj = (obj * weight.type(obj.dtype)).sum()
         if distributed:
-            torch.distributed.all_reduce(obj, op=ReduceOp.SUM)
+            lst = [
+                torch.empty_like(obj) for _ in range(torch.distributed.get_world_size())
+            ]
+            torch.distributed.all_gather(lst, obj)
+            if all([torch.isnan(o) for o in lst]):
+                obj = torch.sum(torch.stack(lst))
+            else:
+                obj = torch.nansum(torch.stack(lst))
         return obj
     elif obj is None:
         return None

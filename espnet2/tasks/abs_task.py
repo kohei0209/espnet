@@ -33,6 +33,7 @@ from espnet2.samplers.unsorted_batch_sampler import UnsortedBatchSampler
 from espnet2.schedulers.noam_lr import NoamLR
 from espnet2.schedulers.warmup_lr import WarmupLR
 from espnet2.schedulers.warmup_step_lr import WarmupStepLR
+from espnet2.schedulers.warmup_reducelronplateau import WarmupReduceLROnPlateau
 from espnet2.torch_utils.load_pretrained_model import load_pretrained_model
 from espnet2.torch_utils.model_summary import model_summary
 from espnet2.torch_utils.pytorch_version import pytorch_cudnn_version
@@ -145,6 +146,7 @@ scheduler_classes = dict(
     CosineAnnealingLR=torch.optim.lr_scheduler.CosineAnnealingLR,
     noamlr=NoamLR,
     warmupsteplr=WarmupStepLR,
+    warmupreducelr=WarmupReduceLROnPlateau,
     warmuplr=WarmupLR,
     cycliclr=torch.optim.lr_scheduler.CyclicLR,
     onecyclelr=torch.optim.lr_scheduler.OneCycleLR,
@@ -569,7 +571,7 @@ class AbsTask(ABC):
         group.add_argument(
             "--use_tensorboard",
             type=str2bool,
-            default=True,
+            default=False,
             help="Enable tensorboard logging",
         )
         group.add_argument(

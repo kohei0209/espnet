@@ -14,6 +14,7 @@ from espnet2.enh.extractor.td_speakerbeam_hybrid_extractor import TDSpeakerBeamE
 from espnet2.enh.extractor.td_dprnn_eda_extractor import DPRNNEDAExtractor
 from espnet2.enh.extractor.sepformer_extractor import SepformerEDAExtractor
 from espnet2.enh.extractor.dptnet_eda_extractor import DPTNetEDAExtractor
+from espnet2.enh.extractor.tfpsnet_eda_extractor import TFPSNetEDAExtractor
 from espnet2.enh.extractor.asenet import ASENet
 from espnet2.tasks.abs_task import AbsTask
 from espnet2.tasks.enh import (
@@ -57,6 +58,7 @@ extractor_choices = ClassChoices(
         asenet=ASENet,
         sepformer_eda=SepformerEDAExtractor,
         dptnet_eda=DPTNetEDAExtractor,
+        tfpsnet_eda=TFPSNetEDAExtractor,
     ),
     type_check=AbsExtractor,
     default="td_speakerbeam",
@@ -461,7 +463,7 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             # logging.warning("Reading " + utt2category_file)
             logging.info("\n\nReading " + utt2category_file)
         else:
-            logging.info("\n\nNOT Reading " + utt2category_file)
+            logging.info("\n\nNOT Reading utt2category" + utt2category_file)
             utt2category_file = None
 
         batch_sampler = build_batch_sampler(
@@ -503,7 +505,6 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             f"[{mode}] mini-batch sizes summary: N-batch={len(bs_list)}, "
             f"mean={np.mean(bs_list):.1f}, min={np.min(bs_list)}, max={np.max(bs_list)}"
         )
-
         if iter_options.distributed:
             world_size = torch.distributed.get_world_size()
             rank = torch.distributed.get_rank()
@@ -514,6 +515,18 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
                         f"{len(batch)} < {world_size}"
                     )
             batches = [batch[rank::world_size] for batch in batches]
+            # if utt2category_file is not None:
+            #     categories = {"2mix": [], "3mix": [], "4mix": [], "5mix":[]}
+            #     for batch in batches:
+            #         category = batch[0][:4] # e.g., 2mix, 3mix, ...
+            #         num_data = len(batch)
+            #         categories[category].append(batch[rank::world_size])
+            #     batches = []
+            #     for category, data in categories.items():
+            #         print(category, len(data), flush=True)
+            #         batches.extend(data)
+            # else:
+            #     batches = [batch[rank::world_size] for batch in batches]
 
         return SequenceIterFactory(
             dataset=dataset,
