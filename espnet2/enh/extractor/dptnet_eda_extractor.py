@@ -35,11 +35,15 @@ class DPTNetEDAExtractor(AbsExtractor, AbsSeparator):
         nonlinear: str = "relu",
         # eda realted arguments
         i_eda_layer: int = 1,
+        num_eda_modules: int = 1,
         triple_path: bool = True,
         # enrollment related arguments
         i_adapt_layer: int = 1,
         adapt_layer_type: str = "mul",
         adapt_enroll_dim: int = 128,
+        adapt_attention_dim: int = 512,
+        adapt_hidden_dim: int = 512,
+        adapt_softmax_temp: int = 2,
     ):
         """Dual-Path RNN (DPRNN) Separator
 
@@ -78,9 +82,13 @@ class DPTNetEDAExtractor(AbsExtractor, AbsSeparator):
             norm_type=norm_type,
             triple_path=triple_path,
             i_eda_layer=i_eda_layer,
+            num_eda_modules=num_eda_modules,
             i_adapt_layer=i_adapt_layer,
             adapt_layer_type=adapt_layer_type,
             adapt_enroll_dim=adapt_enroll_dim,
+            adapt_attention_dim=adapt_attention_dim,
+            adapt_hidden_dim=adapt_hidden_dim,
+            adapt_softmax_temp=adapt_softmax_temp,
         )
 
         # Auxiliary network
