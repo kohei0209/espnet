@@ -2,7 +2,7 @@
 from typing import Dict, List, OrderedDict, Tuple
 
 import torch
-import random
+import numpy as np
 from typeguard import check_argument_types
 
 from espnet2.enh.decoder.abs_decoder import AbsDecoder
@@ -123,8 +123,7 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
             if "speech_ref{}".format(spk + 1) in kwargs
         ]
         # remove dummy tensor with length of one
-        speech_ref_len = len(speech_ref)
-        speech_ref = [s for s in speech_ref if s.shape[-1]>1]
+        speech_ref = [s for s in speech_ref if s.shape[-1] > 1]
         for s in range(len(speech_ref), self.num_spk, 1):
             if "speech_ref{}".format(s + 1) in kwargs:
                 kwargs.pop("speech_ref{}".format(s + 1))
@@ -132,29 +131,30 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         speech_ref = torch.stack(speech_ref, dim=1)
         batch_size = speech_mix.shape[0]
 
-        assert "enroll_ref1" in kwargs, "At least 1 enrollment signal is required."
-        # enrollment signal for each speaker (as the target)
-        enroll_ref = [
-            # (Batch, samples_aux)
-            kwargs["enroll_ref{}".format(spk + 1)]
-            for spk in range(self.num_spk)
-            if "enroll_ref{}".format(spk + 1) in kwargs
-        ]
-        # remove dummy tensor with length of one
-        enroll_ref = [s for s in enroll_ref if s.shape[-1]>1]
-        # remove keys from kwargs
-        for s in range(len(enroll_ref), self.num_spk, 1):
-            if "enroll_ref{}".format(s + 1) in kwargs:
-                kwargs.pop("enroll_ref{}".format(s + 1))
-        enroll_ref_lengths = [
-            # (Batch,)
-            kwargs.get(
-                "enroll_ref{}_lengths".format(spk + 1),
-                torch.ones(batch_size).int().fill_(enroll_ref[spk].size(1)),
-            )
-            for spk in range(self.num_spk)
-            if "enroll_ref{}".format(spk + 1) in kwargs
-        ]
+        if "tse" in self.task:
+            assert "enroll_ref1" in kwargs, "At least 1 enrollment signal is required."
+            # enrollment signal for each speaker (as the target)
+            enroll_ref = [
+                # (Batch, samples_aux)
+                kwargs["enroll_ref{}".format(spk + 1)]
+                for spk in range(self.num_spk)
+                if "enroll_ref{}".format(spk + 1) in kwargs
+            ]
+            # remove dummy tensor with length of one
+            enroll_ref = [s for s in enroll_ref if s.shape[-1] > 1]
+            # remove keys from kwargs
+            for s in range(len(enroll_ref), self.num_spk, 1):
+                if "enroll_ref{}".format(s + 1) in kwargs:
+                    kwargs.pop("enroll_ref{}".format(s + 1))
+            enroll_ref_lengths = [
+                # (Batch,)
+                kwargs.get(
+                    "enroll_ref{}_lengths".format(spk + 1),
+                    torch.ones(batch_size).int().fill_(enroll_ref[spk].size(1)),
+                )
+                for spk in range(self.num_spk)
+                if "enroll_ref{}".format(spk + 1) in kwargs
+            ]
 
         if "noise_ref1" in kwargs:
             # noise signal (optional, required when using beamforming-based
@@ -200,8 +200,9 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
             speech_ref.shape,
             speech_lengths.shape,
         )
-        for aux in enroll_ref:
-            assert aux.shape[0] == speech_mix.shape[0], (aux.shape, speech_mix.shape)
+        if "tse" in self.task:
+            for aux in enroll_ref:
+                assert aux.shape[0] == speech_mix.shape[0], (aux.shape, speech_mix.shape)
 
         # for data-parallel
         speech_ref = speech_ref[..., : speech_lengths.max()].unbind(dim=1)
@@ -212,26 +213,33 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
             dereverb_speech_ref = dereverb_speech_ref.unbind(dim=1)
 
         speech_mix = speech_mix[:, : speech_lengths.max()]
-        enroll_ref = [
-            enroll_ref[spk][:, : enroll_ref_lengths[spk].max()]
-            for spk in range(len(enroll_ref))
-        ]
-        assert len(speech_ref) == len(enroll_ref), (len(speech_ref), len(enroll_ref))
+        if "tse" in self.task:
+            enroll_ref = [
+                enroll_ref[spk][:, : enroll_ref_lengths[spk].max()]
+                for spk in range(len(enroll_ref))
+            ]
+            assert len(speech_ref) == len(enroll_ref), (len(speech_ref), len(enroll_ref))
 
-        num_spk = len(speech_ref)
+        if "num_spk" in kwargs:
+            num_spk = int(kwargs["num_spk"][0].cpu().numpy())
+        else:
+            num_spk = len(speech_ref)
 
         if self.task == "tse":
             is_tse_list = [True]
         elif self.task == "enh":
             is_tse_list = [False]
-        else: # randomly select TSE or Enhancement
+        else:
             is_tse_list = [True, False]
         # loss computation loop
         loss = 0
         stats, weight = [], torch.Tensor([0]).to(torch.int64).to(speech_ref[0].device)
         for i, is_tse in enumerate(is_tse_list):
             if is_tse:
-                spk_idx = random.randint(0, len(speech_ref)-1)
+                if self.training:
+                    spk_idx = np.random.randint(0, len(speech_ref))
+                else:
+                    spk_idx = 0
                 speech_ref_tmp = [speech_ref[spk_idx]]
                 enroll_ref_tmp, enroll_ref_lengths_tmp = [enroll_ref[spk_idx]], [enroll_ref_lengths[spk_idx]]
             else:
@@ -333,10 +341,6 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                             speech_pre = [self.decoder(ps.to(torch.complex64), speech_lengths)[0] for ps in feature_pre]
                         else:
                             speech_pre = [self.decoder(ps.to(torch.float32), speech_lengths)[0] for ps in feature_pre]
-                    # when using float16, istft returns complex32, maybe bug?
-                    # for s in range(len(speech_pre)):
-                    #     if is_complex(speech_pre[s]):
-                    #         speech_pre[s] = speech_pre[s].to(torch.float16)
             else:
                 # some models (e.g. neural beamformer trained with mask loss)
                 # do not predict time-domain signal in the training stage
@@ -408,7 +412,7 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                 if perm is None and "perm" in o:
                     perm = o["perm"]
             # register loss value
-            for n in range(1, self.num_spk+1):
+            for n in range(1, self.num_spk + 1):
                 if n == num_spk:
                     stats[f"tse_{num_spk}spk_loss"] = loss.clone().detach()
                 else:
@@ -531,7 +535,7 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                     perm = o["perm"]
 
             # register loss value
-            for n in range(1, self.num_spk+1):
+            for n in range(1, self.num_spk + 1):
                 if n == num_spk:
                     stats[f"enh_{num_spk}spk_loss"] = loss.clone().detach()
                 else:

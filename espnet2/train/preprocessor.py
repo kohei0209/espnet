@@ -1273,10 +1273,9 @@ class TSEPreprocessor(EnhPreprocessor):
             assert len(ref_names) == len(aux_names), (len(ref_names), len(aux_names))
             if not self.load_all_speakers:
                 # only load one target-speaker data
-                spk = np.random.randint(0, num_spk-1)
-                # while hasattr(self, "dummy_label") and data[f"enroll_ref{spk+1}"] == f"*{self.dummy_label} {self.dummy_label}":
-                #     spk = np.random.randint(0, num_spk-1)
-                # spk = 0
+                spk = np.random.randint(0, num_spk)
+                while hasattr(self, "dummy_label") and data[f"enroll_ref{spk+1}"] == f"*{self.dummy_label} {self.dummy_label}":
+                    spk = np.random.randint(0, num_spk)
 
                 for i, name in enumerate(ref_names):
                     if i == 0:
@@ -1355,6 +1354,7 @@ class EnhTsePreprocessor(TSEPreprocessor):
     def __init__(
         self,
         train: bool,
+        task: str,
         dummy_label: str = "dummy",
         speech_segment: int = None,
         # inherited from TSEPreprocessor
@@ -1406,6 +1406,7 @@ class EnhTsePreprocessor(TSEPreprocessor):
         # This defines the dummy label for handling the variable number of speakers
         self.dummy_label = dummy_label
         self.speech_segment = speech_segment
+        self.load_enrollment = ("tse" in task)
 
     def _speech_process(
         self, uid: str, data: Dict[str, Union[str, np.ndarray]]
@@ -1473,12 +1474,10 @@ class EnhTsePreprocessor(TSEPreprocessor):
                 if v == self.dummy_label:
                     # remove dummy references
                     to_remove.append(k)
-                    # to_remove.append(k.replace("speech_ref", "enroll_ref"))
                 else:
                     ref_names.append(k)
         for k in to_remove:
             if k in data:
-                # data.pop(k)
                 data[k] = np.zeros(1)
 
         # speech segment for sequence-based iterator
@@ -1494,15 +1493,15 @@ class EnhTsePreprocessor(TSEPreprocessor):
             start, frames = 0, -1
 
         num_spk = len(ref_names)
+        data["num_spk"] = np.array([num_spk])
         for spk in range(1, num_spk + 1):
             name = f"speech_ref{spk}"
             # make sure the dummy references only exist after the real ones
-            assert name in data, f"dummy reference must appear after the real ones"
+            assert name in data, "dummy reference must appear after the real ones"
             # Read the speech references
             try:
                 data[name] = soundfile.read(data[name], start=start, frames=frames, dtype=np.float32, always_2d=False)[0]
             except:
-            #except (RuntimeError, soundfile.LibsndfileError):
                 data[name] = soundfile.read(data[name], dtype=np.float32, always_2d=False)[0]
                 if frames != -1:
                     assert self.speech_segment is not None, self.speech_segment
@@ -1510,13 +1509,10 @@ class EnhTsePreprocessor(TSEPreprocessor):
                 logging.warning(
                     f"Something wrong {name}, spk{spk}, {org_len} {start}, {frames}"
                 )
-                # raise RuntimeError(f"Something wrong 2: {data[name]}, spk{spk}, {org_len} {start}, {frames}")
             assert data["speech_mix"].shape[-1] == data[name].shape[-1], (org_len, data["speech_mix"].shape[-1], data[name].shape[-1], start, frames)
-            # data[name] = soundfile.read(data[name])[0]
-        # print(data["speech_mix"].shape,  data["speech_ref5"].shape, start, frames, flush=True)
+
         assert check_return_type(data)
         return data
-
 
     def __call__(
         self, uid: str, data: Dict[str, Union[str, np.ndarray]]
@@ -1524,5 +1520,14 @@ class EnhTsePreprocessor(TSEPreprocessor):
         assert check_argument_types()
 
         data = self._speech_process(uid, data)
-        data = super()._speech_process(uid, data)
+        if self.load_enrollment:
+            data = super()._speech_process(uid, data)
+        else:
+            to_remove = []
+            for k, v in data.items():
+                if re.match(r"enroll_ref\d+", k):
+                    to_remove.append(k)
+            for k in to_remove:
+                if k in data:
+                    data.pop(k)
         return data

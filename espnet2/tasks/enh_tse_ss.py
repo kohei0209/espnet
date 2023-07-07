@@ -250,6 +250,12 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             nargs="+",
             default=None,
         )
+        group.add_argument(
+            "--task",
+            type=str,
+            default="enh",
+            help="Used for preprocessor.",
+        )
 
         for class_choices in cls.class_choices_list:
             # Append --<name> and --<name>_conf.
@@ -558,6 +564,7 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
         # retval = TSEPreprocessor(
         retval = EnhTsePreprocessor(
             train=train,
+            task=getattr(args, "task", "enh_tse"),
             dummy_label=getattr(args, "dummy_label", "dummy"),
             speech_segment=getattr(args, "chunk_length", None),
             # inherited from TSEPreprocessor
