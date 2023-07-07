@@ -27,12 +27,6 @@ from espnet2.utils import config_argparse
 from espnet2.utils.types import str2bool, str2triple_str, str_or_none
 from espnet.utils.cli_utils import get_commandline_args
 
-from mir_eval.separation import bss_eval_sources
-import fast_bss_eval
-from pystoi import stoi
-from pesq import pesq
-from pesq import PesqError
-
 si_snr_loss = SISNRLoss()
 EPS = torch.finfo(torch.get_default_dtype()).eps
 
@@ -89,77 +83,6 @@ def build_model_from_args_and_file(task, args, model_file, device):
         model.load_state_dict(torch.load(model_file, map_location=device))
     return model
 
-def calculate_scores(ref, inf, writer, max_num_spk, sample_rate, key):
-
-    # b. zero-padding estimated sources when under-separation
-    true_num_spk = len(ref)
-    est_num_spk = len(inf)
-    assert true_num_spk == est_num_spk
-    ref = np.concatenate(ref, axis=0)
-    inf = np.concatenate(inf, axis=0)
-
-    # c. evaluation
-    sdr, sir, sar, _ = bss_eval_sources(
-        ref, inf, compute_permutation=False,
-    )
-    # print(ref.shape, inf.shape, sdr, sir, sar, flush=True)
-    assert ref.shape == inf.shape, f"{ref.shape}, {inf.shape}"
-    writer[f"Est_num_spk"][key] = str(est_num_spk)
-    # evaluate sources
-    for i in range(max_num_spk):
-        if i < ref.shape[0]:
-            # SDR SIR SAR
-            writer[f"SDR_spk{i + 1}"][key] = str(sdr[i])
-            writer[f"SAR_spk{i + 1}"][key] = str(sar[i])
-            writer[f"SIR_spk{i + 1}"][key] = str(sir[i])
-
-            # SI-SNR
-            si_snr_score = -float(
-                si_snr_loss(
-                    torch.from_numpy(ref[i][None, ...]),
-                    torch.from_numpy(inf[i][None, ...]),
-                )
-            )
-            writer[f"SI_SNR_spk{i + 1}"][key] = str(si_snr_score)
-
-            # STOI, ESTOI
-            stoi_score = stoi(ref[i], inf[i], fs_sig=sample_rate)
-            estoi_score = stoi(
-                ref[i], inf[i], fs_sig=sample_rate, extended=True
-            )
-            writer[f"STOI_spk{i + 1}"][key] = str(stoi_score * 100)  # in percentage
-            writer[f"ESTOI_spk{i + 1}"][key] = str(estoi_score * 100)
-
-            # PESQ
-            if sample_rate == 16000:
-                wbpesq_score = pesq(sample_rate, ref[i], inf[i], mode="wb", on_error=PesqError.RETURN_VALUES,)
-            nbpesq_score = pesq(sample_rate, ref[i], inf[i], mode="nb", on_error=PesqError.RETURN_VALUES,)
-            if sample_rate == 16000:
-                if wbpesq_score == PesqError.NO_UTTERANCES_DETECTED:
-                    print(key, flush=True)
-                else:
-                    writer[f"WBPESQ_spk{i + 1}"][key] = str(wbpesq_score)  # in percentage
-            if nbpesq_score == PesqError.NO_UTTERANCES_DETECTED:
-                print(key, flush=True)
-            else:
-                writer[f"NBPESQ_spk{i + 1}"][key] = str(nbpesq_score)
-            # print(f"{i}-th spk, {si_snr_score}, {stoi_score}")
-        # write dummy scores
-        else:
-            dummy_word = "dummy"
-            writer[f"STOI_spk{i + 1}"][key] = dummy_word
-            writer[f"ESTOI_spk{i + 1}"][key] = dummy_word
-            if sample_rate == 16000:
-                writer[f"WBPESQ_spk{i + 1}"][key] = dummy_word
-            writer[f"NBPESQ_spk{i + 1}"][key] = dummy_word
-            writer[f"SI_SNR_spk{i + 1}"][key] = dummy_word
-            writer[f"SDR_spk{i + 1}"][key] = dummy_word
-            writer[f"SAR_spk{i + 1}"][key] = dummy_word
-            writer[f"SIR_spk{i + 1}"][key] = dummy_word
-
-    assert inf.ndim == 2, "shape should be (n_spk, n_samples) and there must not be the batch dimension"
-    inf = [w[None] for w in inf]
-    return inf
 
 
 class SeparateSpeech:
@@ -248,22 +171,17 @@ class SeparateSpeech:
             self.ref_channel = enh_model.ref_channel
 
         self.segmenting = segment_size is not None and hop_size is not None
-        # if self.segmenting:
-        #     logging.info("Perform segment-wise speech %s" % task)
-        #     logging.info(
-        #         "Segment length = {} sec, hop length = {} sec".format(
-        #             segment_size, hop_size
-        #         )
-        #     )
-        # else:
-        #     logging.info("Perform direct speech %s on the input" % task)
 
         self.max_num_spk = enh_model.num_spk
-        self.use_true_nspk = use_true_nspk # if true, number of speakers are informed to model
+
+        self.use_true_nspk = use_true_nspk  # if true, number of speakers are informed to model
 
     @torch.no_grad()
     def __call__(
-        self, speech_mix: Union[torch.Tensor, np.ndarray], fs: int = 8000, num_spk: int = None, **kwargs
+        self, speech_mix: Union[torch.Tensor, np.ndarray],
+        fs: int = 8000,
+        num_spk: int = None,
+        **kwargs,
     ) -> List[torch.Tensor]:
         """Inference
 
@@ -329,120 +247,25 @@ class SeparateSpeech:
             feats_aux = enroll_ref
             flens_aux = aux_lengths
 
-        if self.segmenting and lengths[0] > self.segment_size * fs:
-            # Segment-wise speech enhancement/separation
-            overlap_length = int(np.round(fs * (self.segment_size - self.hop_size)))
-            num_segments = int(
-                np.ceil((speech_mix.size(1) - overlap_length) / (self.hop_size * fs))
-            )
-            t = T = int(self.segment_size * fs)
-            pad_shape = speech_mix[:, :T].shape
-            enh_waves = []
-            range_ = trange if self.show_progressbar else range
-            for i in range_(num_segments):
-                st = int(i * self.hop_size * fs)
-                en = st + T
-                if en >= lengths[0]:
-                    # en - st < T (last segment)
-                    en = lengths[0]
-                    speech_seg = speech_mix.new_zeros(pad_shape)
-                    t = en - st
-                    speech_seg[:, :t] = speech_mix[:, st:en]
-                else:
-                    t = T
-                    speech_seg = speech_mix[:, st:en]  # B x T [x C]
+        # b. Enhancement/Separation Forward
+        feats, f_lens = self.enh_model.encoder(speech_mix, lengths)
 
-                lengths_seg = speech_mix.new_full(
-                    [batch_size], dtype=torch.long, fill_value=T
+        feature_pre, _, others = zip(
+            *[
+                self.enh_model.extractor(
+                    feats,
+                    f_lens,
+                    feats_aux[spk],
+                    flens_aux[spk],
+                    suffix_tag=f"_spk{spk + 1}",
+                    num_spk=num_spk,
                 )
-                # b. Enhancement/Separation Forward
-                feats, f_lens = self.enh_model.encoder(speech_seg, lengths_seg)
-                feature_pre, _, others = zip(
-                    *[
-                        self.enh_model.extractor(
-                            feats,
-                            f_lens,
-                            feats_aux[spk],
-                            flens_aux[spk],
-                            suffix_tag=f"_spk{spk + 1}",
-                            num_spk=num_spk,
-                        )
-                        for spk in range(len(enroll_ref))
-                    ]
-                )
-                processed_wav = [
-                    self.enh_model.decoder(f, lengths_seg)[0] for f in feature_pre
-                ]
-                if speech_seg.dim() > 2:
-                    # multi-channel speech
-                    speech_seg_ = speech_seg[:, self.ref_channel]
-                else:
-                    speech_seg_ = speech_seg
+                for spk in range(len(enroll_ref))
+            ]
+        )
+        others = {k: v for dic in others for k, v in dic.items()}
 
-                if self.normalize_segment_scale:
-                    # normalize the scale to match the input mixture scale
-                    mix_energy = torch.sqrt(
-                        torch.mean(speech_seg_[:, :t].pow(2), dim=1, keepdim=True)
-                    )
-                    enh_energy = torch.sqrt(
-                        torch.mean(
-                            sum(processed_wav)[:, :t].pow(2), dim=1, keepdim=True
-                        )
-                    )
-                    processed_wav = [
-                        w * (mix_energy / enh_energy) for w in processed_wav
-                    ]
-                # List[torch.Tensor(num_spk, B, T)]
-                enh_waves.append(torch.stack(processed_wav, dim=0))
-
-            # c. Stitch the enhanced segments together
-            waves = enh_waves[0]
-            for i in range(1, num_segments):
-                # permutation between separated streams in last and current segments
-                perm = self.cal_permumation(
-                    waves[:, :, -overlap_length:],
-                    enh_waves[i][:, :, :overlap_length],
-                    criterion="si_snr",
-                )
-                # repermute separated streams in current segment
-                for batch in range(batch_size):
-                    enh_waves[i][:, batch] = enh_waves[i][perm[batch], batch]
-
-                if i == num_segments - 1:
-                    enh_waves[i][:, :, t:] = 0
-                    enh_waves_res_i = enh_waves[i][:, :, overlap_length:t]
-                else:
-                    enh_waves_res_i = enh_waves[i][:, :, overlap_length:]
-
-                # overlap-and-add (average over the overlapped part)
-                waves[:, :, -overlap_length:] = (
-                    waves[:, :, -overlap_length:] + enh_waves[i][:, :, :overlap_length]
-                ) / 2
-                # concatenate the residual parts of the later segment
-                waves = torch.cat([waves, enh_waves_res_i], dim=2)
-            # ensure the stitched length is same as input
-            assert waves.size(2) == speech_mix.size(1), (waves.shape, speech_mix.shape)
-            waves = torch.unbind(waves, dim=0)
-        else:
-            # b. Enhancement/Separation Forward
-            feats, f_lens = self.enh_model.encoder(speech_mix, lengths)
-
-            feature_pre, _, others = zip(
-                *[
-                    self.enh_model.extractor(
-                        feats,
-                        f_lens,
-                        feats_aux[spk],
-                        flens_aux[spk],
-                        suffix_tag=f"_spk{spk + 1}",
-                        num_spk=num_spk,
-                    )
-                    for spk in range(len(enroll_ref))
-                ]
-            )
-            others = {k: v for dic in others for k, v in dic.items()}
-
-            waves = [self.enh_model.decoder(f, lengths)[0] for f in feature_pre]
+        waves = [self.enh_model.decoder(f, lengths)[0] for f in feature_pre]
 
         assert len(waves[0]) == batch_size, (len(waves[0]), batch_size)
         if self.normalize_output_wav:
@@ -534,7 +357,6 @@ def inference(
     hop_size: Optional[float],
     normalize_segment_scale: bool,
     use_true_nspk: bool,
-    eval_mixture: bool,
     show_progressbar: bool,
     ref_channel: Optional[int],
     normalize_output_wav: bool,
@@ -597,6 +419,11 @@ def inference(
 
     # 4. Start for-loop
     output_dir = Path(output_dir).expanduser().resolve()
+    # if n_mix was specified during training, we evaluate only N-mix data
+    n_mix = separate_speech.enh_train_args.n_mix
+    if n_mix is not None:
+        assert max_num_spk == max(n_mix), (max_num_spk, n_mix)
+        logging.info(f"Inference is done with only {n_mix}-mix data")
     writers = []
     for i in range(max_num_spk):
         writers.append(
@@ -604,40 +431,35 @@ def inference(
         )
 
     import tqdm
-    with DatadirWriter(score_output_dir) as score_writer:
-        for i, (keys, batch) in tqdm.tqdm(enumerate(loader)):
-            logging.info(f"[{i}] Enhancing {keys}")
-            assert isinstance(batch, dict), type(batch)
-            assert all(isinstance(s, str) for s in keys), keys
-            _bs = len(next(iter(batch.values())))
-            assert len(keys) == _bs, f"{len(keys)} != {_bs}"
-            ref = {k: v for k, v in batch.items() if re.match(r"speech_ref\d+", k)}
-            batch = {k: v for k, v in batch.items() if (k=="speech_mix" or re.match(r"enroll_ref\d+", k))}
+    for i, (keys, batch) in tqdm.tqdm(enumerate(loader)):
+        # skip samples when evaluating only N-mix
+        if n_mix is not None and int(keys[0][0]) not in n_mix:
+            continue
+        logging.info(f"[{i}] Enhancing {keys}")
+        assert isinstance(batch, dict), type(batch)
+        assert all(isinstance(s, str) for s in keys), keys
+        _bs = len(next(iter(batch.values())))
+        assert len(keys) == _bs, f"{len(keys)} != {_bs}"
+        ref = {k: v for k, v in batch.items() if re.match(r"speech_ref\d+", k)}
+        batch = {k: v for k, v in batch.items() if (k == "speech_mix" or re.match(r"enroll_ref\d+", k))}
 
-            # remove dummy reference
-            ref = [
-                ref.get(
-                    f"speech_ref{spk + 1}",
-                    torch.zeros_like(ref["speech_ref1"]),
-                )
-                for spk in range(max_num_spk)
-                if "speech_ref{}".format(spk + 1) in ref
-            ]
-            ref = [s for s in ref if s.shape[-1]>1]
-            num_spk = len(ref)
+        # remove dummy reference
+        ref = [
+            ref.get(
+                f"speech_ref{spk + 1}",
+                torch.zeros_like(ref["speech_ref1"]),
+            )
+            for spk in range(max_num_spk)
+            if "speech_ref{}".format(spk + 1) in ref
+        ]
+        ref = [s for s in ref if s.shape[-1] > 1]
+        num_spk = len(ref)
 
-            waves = separate_speech(**batch, fs=fs, num_spk=num_spk)
-            waves = calculate_scores(ref, waves, score_writer, max_num_spk, fs, keys[0])
-            for spk, w in enumerate(waves):
-                for b in range(batch_size):
-                    writers[spk][keys[b]] = fs, w[b]
-
-            # if i==0:
-            #     import soundfile as sf
-            #     for j, r in enumerate(ref):
-            #         print(r.shape, flush=True)
-            #         sf.write(f"est{j}.wav", r[0], 8000)
-            #     break
+        waves = separate_speech(**batch, fs=fs, num_spk=num_spk)
+        assert len(waves) == num_spk
+        for spk, w in enumerate(waves):
+            for b in range(batch_size):
+                writers[spk][keys[b]] = fs, w[b]
 
     for writer in writers:
         writer.close()
@@ -660,7 +482,7 @@ def get_parser():
     )
 
     parser.add_argument("--output_dir", type=str, required=True)
-    parser.add_argument("--score_output_dir", type=str, required=True)
+    parser.add_argument("--score_output_dir", type=str, required=True, help="placeholder to make it consistent to enhancement inference")
     parser.add_argument(
         "--ngpu",
         type=int,
@@ -698,7 +520,7 @@ def get_parser():
     group.add_argument(
         "--normalize_output_wav",
         type=str2bool,
-        default=False,
+        default=True,
         help="Whether to normalize the predicted wav to [-1~1]",
     )
 
@@ -736,12 +558,6 @@ def get_parser():
         type=str2bool,
         default=False,
         help="Whether to inform true number of speakers to model",
-    )
-    group.add_argument(
-        "--eval_mixture",
-        type=str2bool,
-        default=False,
-        help="Not used in this script",
     )
 
     group = parser.add_argument_group("Data loading related")
