@@ -26,4 +26,5 @@ config=./conf/tuning/train_enh_dprnn_tasnet.yaml
     --ngpu 1 \
     --local_data_opts "--sample_rate ${sample_rate} --min_or_max ${min_or_max}" \
     --enh_config "${config}" \
+    --ref_num 5 \
     "$@"

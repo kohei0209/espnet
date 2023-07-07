@@ -35,7 +35,7 @@ num_nodes=1      # The number of nodes
 nj=32            # The number of parallel jobs.
 dumpdir=dump     # Directory to dump features.
 inference_nj=32     # The number of parallel jobs in inference.
-gpu_inference=false # Whether to perform gpu inference.
+gpu_inference=true # Whether to perform gpu inference.
 expdir=exp       # Directory to save experiments.
 python=python3       # Specify python to execute espnet commands
 
@@ -47,7 +47,7 @@ speed_perturb_factors=  # perturbation factors, e.g. "0.9 1.0 1.1" (separated by
 
 # Feature extraction related
 feats_type=raw    # Feature type (raw or fbank_pitch).
-audio_format=flac # Audio format: wav, flac, wav.ark, flac.ark  (only in feats_type=raw).
+audio_format=wav # Audio format: wav, flac, wav.ark, flac.ark  (only in feats_type=raw).
 fs=16k            # Sampling rate.
 min_wav_duration=0.1   # Minimum duration in second
 max_wav_duration=20    # Maximum duration in second
@@ -58,7 +58,7 @@ enh_tag=    # Suffix to the result dir for enhancement model training.
 enh_config= # Config for enhancement model training.
 enh_args=   # Arguments for enhancement model training, e.g., "--max_epoch 10".
             # Note that it will overwrite args in enhancement config.
-ref_num=2   # Number of references for training.
+ref_num=5   # Number of references for training.
             # In supervised learning based speech enhancement / separation, it is equivalent to number of speakers.
 inf_num=    # Number of inferences output by the model
             # Note that if it is not specified, it will be the same as ref_num. Otherwise, it will be overwritten.
@@ -83,7 +83,7 @@ inference_model=valid.loss.best.pth
 download_model=
 
 # Evaluation related
-scoring_protocol="Est_num_spk NBPESQ ESTOI STOI SDR SAR SIR SI_SNR"
+scoring_protocol="NBPESQ ESTOI STOI SDR SAR SIR SI_SNR"
 ref_channel=0
 inference_tag=  # Prefix to the result dir for ENH inference.
 inference_enh_config= # Config for enhancement.
@@ -743,11 +743,10 @@ if ! "${skip_eval}"; then
         mkdir -p "${enh_exp}"; echo "${run_args} --stage 7 \"\$@\"; exit \$?" > "${enh_exp}/run_enhance.sh"; chmod +x "${enh_exp}/run_enhance.sh"
         _opts=
 
-        # for task in "tse" "separation"; do
-        for task in enh; do
-            for use_true_nspk in true; do
+        for task in tse; do
+            for use_true_nspk in false; do
                 # for dset in "${valid_set}" ${test_sets}; do
-                for dset in ${valid_set}; do
+                for dset in ${test_sets}; do
                     _dir="${enh_exp}/${inference_tag}_${dset}/${task}"
                     if ${use_true_nspk}; then
                         _dir="${_dir}/with_true_numspk"
@@ -812,7 +811,6 @@ if ! "${skip_eval}"; then
                             --score_output_dir "${_scorelogdir}"/output.JOB \
                             --max_num_spk ${ref_num} \
                             --use_true_nspk ${use_true_nspk} \
-                            --eval_mixture false \
                             ${_opts} ${inference_args} || { cat $(grep -l -i error "${_logdir}"/enh_inference.*.log) ; exit 1; }
 
 
@@ -828,11 +826,15 @@ if ! "${skip_eval}"; then
                         done | LC_ALL=C sort -k1 > "${_dir}/${spk}.scp"
                     done
 
-                    for protocol in Est_num_spk; do
-                        for i in $(seq "${_nj}"); do
-                            cat "${_scorelogdir}/output.${i}/${protocol}"
-                        done | LC_ALL=C sort -k1 > "${_scoredir}/${protocol}"
-                    done
+                    if [ "${task}" = "enh"]; then
+                        for protocol in Est_num_spk; do
+                            for i in $(seq "${_nj}"); do
+                                if [ -e "${_scorelogdir}/output.${i}" ]; then
+                                    cat "${_scorelogdir}/output.${i}/${protocol}"
+                                fi
+                            done | LC_ALL=C sort -k1 > "${_scoredir}/${protocol}"
+                        done
+                    fi
                 done
             done
         done
@@ -846,7 +848,7 @@ if ! "${skip_eval}"; then
         # score_obs=true: Scoring for observation signal
         # score_obs=false: Scoring for enhanced signal
         for score_obs in false; do
-            for task in enh; do
+            for task in tse; do
                 for use_true_nspk in false; do
                     # for dset in "${valid_set}" ${test_sets}; do
                     for dset in ${test_sets}; do
@@ -877,7 +879,11 @@ if ! "${skip_eval}"; then
                         fi
 
                         # 1. Split the key file
-                        key_file=${_data}/wav.scp
+                        if ${score_obs}; then
+                            key_file=${_data}/wav.scp
+                        else
+                            key_file=${_dir}/spk1.scp
+                        fi
                         split_scps=""
                         _nj=$(min "${inference_nj}" "$(<${key_file} wc -l)")
                         for n in $(seq "${_nj}"); do
@@ -910,9 +916,9 @@ if ! "${skip_eval}"; then
                         fi
 
                         # 2. Submit scoring jobs
-                        log "Scoring started... log: '${_logdir}/enh_scoring.*.log'"
+                        log "Scoring started... log: '${_scorelogdir}/enh_scoring.*.log'"
                         # shellcheck disable=SC2086
-                        ${_cmd} JOB=1:"${_nj}" "${_logdir}"/enh_scoring.JOB.log \
+                        ${_cmd} JOB=1:"${_nj}" "${_scorelogdir}"/enh_scoring.JOB.log \
                             ${python} -m espnet2.bin.enh_variable_number_speakers_scoring \
                                 --key_file "${_logdir}"/keys.JOB.scp \
                                 --output_dir "${_scoredir}"/output.JOB \
@@ -923,26 +929,29 @@ if ! "${skip_eval}"; then
 
                         for spk in $(seq "${ref_num}"); do
                             for protocol in ${scoring_protocol} wav; do
-                                if [ "${protocol}" != "Est_num_spk" ]; then
-                                    for i in $(seq "${_nj}"); do
-                                        cat "${_scoredir}/output.${i}/${protocol}_spk${spk}"
-                                    done | LC_ALL=C sort -k1 > "${_scoredir}/${protocol}_spk${spk}"
-                                fi
+                                # if [ "${protocol}" != "Est_num_spk" ]; then
+                                for i in $(seq "${_nj}"); do
+                                    cat "${_scoredir}/output.${i}/${protocol}_spk${spk}"
+                                done | LC_ALL=C sort -k1 > "${_scoredir}/${protocol}_spk${spk}"
+                                # fi
                             done
                         done
 
+                        if [ "${task}" = "enh"]; then
+                            scoring_protocol+=" Est_num_spk"
+                        fi
                         score_summary_module=espnet2.bin.enh_variable_number_spkeakers_score_summary
                         python -m ${score_summary_module} \
                             --score_dir "${_scoredir}" \
-                            --output_dir "${_scoredir}" \
+                            --output_dir "${_dir}" \
                             --protocols "${scoring_protocol}" \
                             --max_num_spk ${ref_num}
                     done
                 done
             done
         done
-        log "Evaluation result for observation: ${data_feats}/RESULTS.md"
-        log "Evaluation result for enhancement: ${enh_exp}/RESULTS.md"
+        log "Evaluation result for observation: ${data_feats}/score_summary.json"
+        log "Evaluation result for enhancement: ${_dir}/score_summary.json"
 
     fi
 
