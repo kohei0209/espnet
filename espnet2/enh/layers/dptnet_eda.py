@@ -444,12 +444,11 @@ class FiLM(nn.Module):
         indim,
         enrolldim,
         filmdim,
-        activation="relu",
     ):
         super().__init__()
         self.linear1 = nn.Sequential(
             nn.Linear(indim, filmdim),
-            nn.ReLU(),
+            nn.PReLU(),
         )
         self.film_gamma = nn.Linear(enrolldim, filmdim)
         self.film_beta = nn.Linear(enrolldim, filmdim)

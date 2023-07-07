@@ -12,6 +12,7 @@ from espnet2.enh.layers.tcn import choose_norm
 
 from espnet2.enh.layers.adapt_layers import make_adapt_layer
 from espnet2.enh.layers.dprnn_eda import SequenceAggregation, EncoderDecoderAttractor
+from espnet2.enh.layers.dptnet_eda import FiLM
 
 
 EPS = torch.finfo(torch.get_default_dtype()).eps
@@ -303,6 +304,7 @@ class TFPSBlockType2(nn.Module):
             )
         return recon.contiguous()
 
+
 class TFPSNet_Transformer(TFPSNet_Base):
     def __init__(
         self,
@@ -368,8 +370,13 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
         # EDA-related arguments
         i_eda_layer=4,
         num_eda_modules=1,
+        # TSE-related arguments
         i_adapt_layer=4,
+        adapt_layer_type="tfattn",
         adapt_enroll_dim=64,
+        adapt_attention_dim=512,
+        adapt_hidden_dim=512,
+        adapt_softmax_temp=1,
     ):
         super().__init__(
             input_size,
@@ -397,20 +404,43 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
         # tse related params
         self.i_adapt_layer = i_adapt_layer
         if i_adapt_layer is not None:
+            assert adapt_layer_type in ["tfattn", "tfattn_improved"]
             self.adapt_enroll_dim = adapt_enroll_dim
-            adapt_layer_kwargs={
-                "is_dualpath_process": True,
-                "attention_dim": 512,
-                "time_varying": True,
-                "apply_mlp": True,
+            self.adapt_layer_type = adapt_layer_type
+            adapt_layer_params = {
+                "attention_dim": adapt_attention_dim,
+                "hidden_dim": adapt_hidden_dim,
+                "softmax_temp": adapt_softmax_temp,
             }
+            # prepare additional processing block
+            if adapt_layer_type == "tfattn_improved":
+                self.conditional_model = Conditional_TFPSNet_Transformer(
+                    bottleneck_size,
+                    adapt_hidden_dim,
+                    bottleneck_size,
+                    output_size,
+                    (1, ),
+                    SingleTransformer,
+                    rnn_type,
+                    bottleneck_size,
+                    att_heads,
+                    hidden_size,
+                    dropout=dropout,
+                    activation=activation,
+                    bidirectional=bidirectional,
+                    norm=norm_type,
+                )
+                adapt_layer_type = "tfattn"
+            # load speaker selection module
             self.adapt_layer = make_adapt_layer(
-                "attn",
-                indim=input_size,
-                enrolldim=adapt_enroll_dim,
+                adapt_layer_type,
+                indim=bottleneck_size,
+                enrolldim=bottleneck_size,
                 ninputs=1,
-                adapt_layer_kwargs=adapt_layer_kwargs,
+                adapt_layer_kwargs=adapt_layer_params,
             )
+            self.layer_norm_enroll = ChannelwiseLayerNorm(adapt_enroll_dim)
+            self.bottleneck_conv1x1_enroll = nn.Conv1d(adapt_enroll_dim, bottleneck_size, 1, bias=False)
 
     def forward(self, input, enroll_emb, num_spk=None):
         is_tse = enroll_emb is not None
@@ -429,41 +459,74 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
                 # aggregated_sequence = self.sequence_aggregation(output.permute(0, 2, 3, 1))
                 aggregated_sequence = self.sequence_aggregation(output.transpose(-1, -3))
                 attractors, probabilities = self.eda(aggregated_sequence, num_spk=num_spk)
-                output = output[..., None, :, :, :] * attractors[..., :-1, :, None, None] # [B, J, N, L, K]
+                output = output[..., None, :, :, :] * attractors[..., :-1, :, None, None]  # [B, J, N, L, K]
                 output = output.view(-1, H, F, T)
                 B = output.shape[0]
             # target speaker extraction part
             if i == self.i_adapt_layer and is_tse:
-                assert False, "needs debug"
-                output = output.view(org_B, -1, H, F, T).permute(0, 1, 3, 4, 2)
-                output = self.adapt_layer(output, enroll_emb.permute(0, 2, 3, 1))
-                output = output.permute(0, 3, 1, 2)
+                T_enroll = enroll_emb.shape[-1]
+                enroll_emb = self.layer_norm(enroll_emb.reshape(orig_B, N, -1))
+                enroll_emb = self.bottleneck_conv1x1(enroll_emb).reshape(orig_B, -1, F, T_enroll)  # B, BN, F, T
+                output = output.view(orig_B, -1, H, F, T)
+                output = self.adapt_layer(output, enroll_emb)
+                if self.adapt_layer_type == "tfattn_improved":
+                    output = self.conditional_model(output, enroll_emb.mean(dim=(-1), keepdim=True))
 
         if self.i_eda_layer is None:
             probabilities = None
         output = self.output(output)  # B, output_size, dim1, dim2
         return output, probabilities
 
-    def eda_process(self, x, num_spk):
-        num_attractors = []
-        attractors = []
-        probabilities = []
-        for i in range(self.num_eda_modules):
-            aggregated_sequence = self.sequence_aggregation[i](x.permute(0, 2, 3, 1))
-            attractor, probability = self.eda[i](aggregated_sequence, num_spk=num_spk)
-            attractors.append(attractor)
-            probabilities.append(probability)
-            num_attractors.append(attractor.shape[-2]) # estimated number of speakers
-        # we use mode value as the estimated number of speakers
-        output, count = 0., 0
-        est_num_spk = statistics.mode(num_attractors)
-        for i in range(self.num_eda_modules):
-            if num_attractors[i] == est_num_spk:
-                output = output + (x[..., None, :, :, :] * attractors[i][..., :-1, :, None, None]) # [B, J, N, L, K]
-                count += 1
-        output = output / count
-        probabilities = torch.cat(probabilities, dim=0) # concat along batch dim
-        return output, probabilities
+
+class Conditional_TFPSNet_Transformer(nn.Module):
+    def __init__(
+        self,
+        enroll_size,
+        conditioning_size,
+        bottleneck_size,
+        output_size,
+        tfps_blocks,
+        nn_module,
+        *nn_args,
+        **nn_kwargs,
+    ):
+        super().__init__()
+        self.bottleneck_size = bottleneck_size
+        self.output_size = output_size
+
+        # dual-path transformer
+        self.tfps_blocks = nn.ModuleList()
+        self.film = nn.ModuleList()
+        for block in tfps_blocks:
+            if block == 1:
+                self.tfps_blocks.append(
+                    TFPSBlockType1(nn_module, *nn_args, **nn_kwargs)
+                )
+            elif block == 2:
+                self.tfps_blocks.append(
+                    TFPSBlockType2(nn_module, *nn_args, **nn_kwargs)
+                )
+            else:
+                raise ValueError(f"TFPSBlock type ({block}) must be either 1 or 2")
+            self.film.append(
+                FiLM(
+                    bottleneck_size,
+                    enroll_size,
+                    conditioning_size,
+                )
+            )
+        self.hidden_size = bottleneck_size
+
+    def forward(self, input, enroll_emb):
+        B, BN, F, T = input.shape
+        output = input
+        for i, block in enumerate(self.tfps_blocks):
+            output = self.film[i](output.transpose(-1, -3), enroll_emb.transpose(-1, -3)).transpose(-1, -3)
+            if isinstance(block, TFPSBlockType2):
+                output = block(output, apply_attn_mask=True)
+            else:
+                output = block(output)
+        return output
 
 
 class TFPSNet_RNN(TFPSNet_Base):

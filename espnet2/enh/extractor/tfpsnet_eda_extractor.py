@@ -1,8 +1,6 @@
 from collections import OrderedDict
 from distutils.version import LooseVersion
-from typing import Dict
 from typing import List
-from typing import Optional
 from typing import Tuple
 from typing import Union
 
@@ -11,8 +9,7 @@ from torch_complex.tensor import ComplexTensor
 
 from espnet2.enh.layers.complex_utils import is_complex
 from espnet2.enh.layers.complex_utils import new_complex_like
-from espnet2.enh.layers.tfpsnet import TFPSNet_Transformer_EDA
-from espnet2.enh.layers.tfpsnet import TFPSNet_Transformer
+from espnet2.enh.layers.tfpsnet import TFPSNet_Transformer_EDA, TFPSNet_Transformer
 from espnet2.enh.separator.abs_separator import AbsSeparator
 from espnet2.enh.extractor.abs_extractor import AbsExtractor
 
@@ -36,10 +33,16 @@ class TFPSNetEDAExtractor(AbsExtractor, AbsSeparator):
         norm_type: str = "gLN",
         nonlinear: str = "relu",
         masking: bool = True,
+        # eda realted arguments
         i_eda_layer: int = 4,
         num_eda_modules: int = 1,
+        # enrollment related arguments
         i_adapt_layer: int = 4,
+        adapt_layer_type: str = "tfattn",
         adapt_enroll_dim: int = 64,
+        adapt_attention_dim: int = 512,
+        adapt_hidden_dim: int = 512,
+        adapt_softmax_temp: int = 1,
     ):
         """Time-Frequency Domain Path Scanning Network (TFPSNet) Separator.
 
@@ -90,11 +93,32 @@ class TFPSNetEDAExtractor(AbsExtractor, AbsSeparator):
                 activation="relu",
                 bidirectional=bidirectional,
                 norm_type=norm_type,
+                # EDA-related
                 i_eda_layer=i_eda_layer,
                 num_eda_modules=num_eda_modules,
+                # TSE-related
                 i_adapt_layer=i_adapt_layer,
+                adapt_layer_type=adapt_layer_type,
                 adapt_enroll_dim=adapt_enroll_dim,
+                adapt_attention_dim=adapt_attention_dim,
+                adapt_hidden_dim=adapt_hidden_dim,
+                adapt_softmax_temp=adapt_softmax_temp,
             )
+            if i_adapt_layer is not None:
+                self.auxiliary_net = TFPSNet_Transformer(
+                    enc_channels,
+                    bottleneck_size,
+                    output_size=enc_channels,
+                    tfps_blocks=(1,),
+                    # Transformer-specific arguments
+                    rnn_type=rnn_type,
+                    hidden_size=unit,
+                    att_heads=4,
+                    dropout=dropout,
+                    activation="relu",
+                    bidirectional=bidirectional,
+                    norm_type=norm_type,
+                )
 
         # gated output layer
         if masking:
@@ -154,7 +178,7 @@ class TFPSNetEDAExtractor(AbsExtractor, AbsSeparator):
             # real and imag parts
             assert input.size(-1) == 2, input.shape
             feature = input.permute(0, 3, 2, 1)
-            input = ComplexTensor(input[..., 0], input[..., 1])
+            feature = ComplexTensor([..., 0], input[..., 1])
 
         B, _, F, T = feature.shape
 
@@ -169,8 +193,16 @@ class TFPSNetEDAExtractor(AbsExtractor, AbsSeparator):
         if is_tse:
             if is_complex(input_aux):
                 enroll_emb = torch.stack([input_aux.real, input_aux.imag], dim=-2)  # B, T, 2, F
+                enroll_emb = enroll_emb.moveaxis(1, -1)
+                T_emb = enroll_emb.shape[-1]
+                enroll_emb = enroll_emb.moveaxis(-1, 1).reshape(B * T_emb, 2, F)
+                enroll_emb = torch.nn.functional.pad(enroll_emb, (0, 5), mode="circular")
+                enroll_emb = self.post_encoder(enroll_emb)  # B*T, enc_channels, F
+                enroll_emb = enroll_emb.reshape(B, T_emb, -1, F).moveaxis(1, -1)  # B, enc_channels, F, T
+                enroll_emb = self.auxiliary_net(enroll_emb)
             else:
-                enroll_emb = input_aux
+                # real and imag parts
+                raise NotImplementedError("Input must be complex")
         else:
             enroll_emb = None
 
@@ -193,6 +225,8 @@ class TFPSNetEDAExtractor(AbsExtractor, AbsSeparator):
         # B, num_spk, T, F, enc_channels
         # masked = self.pre_decoder(masked.permute(0, 1, 4, 3, 2))
         masked = new_complex_like(input, (masked[..., 0], masked[..., 1])).unbind(1)
+        if is_tse:
+            masked = masked[0]
         if self.masking:
             others = OrderedDict(
                 zip(["mask_spk{}".format(i + 1) for i in range(len(masks))], masks)
