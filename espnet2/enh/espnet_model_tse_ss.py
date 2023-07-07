@@ -13,6 +13,7 @@ from espnet2.enh.loss.criterions.time_domain import TimeDomainLoss
 from espnet2.enh.loss.wrappers.abs_wrapper import AbsLossWrapper
 from espnet2.torch_utils.device_funcs import force_gatherable
 from espnet2.train.abs_espnet_model import AbsESPnetModel
+from espnet2.enh.layers.complex_utils import is_complex
 
 EPS = torch.finfo(torch.get_default_dtype()).eps
 
@@ -28,6 +29,7 @@ def normalization(speech_mix, speech_ref=None, eps=1e-8):
         speech_ref = [(ref - mean) / (std + eps) for ref in speech_ref]
         return speech_mix, speech_ref, mean, std
 
+
 def merge_two_dicts(dicts):
     new_dict = dicts[0]
     if len(dicts) == 1:
@@ -38,6 +40,7 @@ def merge_two_dicts(dicts):
         else:
             new_dict[key] = value
     return new_dict
+
 
 class ESPnetExtractionEnhancementModel(AbsESPnetModel):
     """Target Speaker Extraction Frontend model"""
@@ -273,7 +276,8 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
             if is_tse:
                 enroll_ref = [normalization(enroll_ref[spk])[0] for spk in range(len(enroll_ref))]
 
-        feature_mix, flens = self.encoder(speech_mix, speech_lengths)
+        with torch.cuda.amp.autocast(enabled=False):
+            feature_mix, flens = self.encoder(speech_mix.to(torch.float32), speech_lengths)
 
         if is_tse:
             if self.share_encoder:
@@ -302,7 +306,11 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
             )
             others = {k: v for dic in others for k, v in dic.items()}
             if feature_pre[0] is not None:
-                speech_pre = [self.decoder(ps, speech_lengths)[0] for ps in feature_pre]
+                with torch.cuda.amp.autocast(enabled=False):
+                    if is_complex(feature_pre[0]):
+                        speech_pre = [self.decoder(ps.to(torch.complex64), speech_lengths)[0] for ps in feature_pre]
+                    else:
+                        speech_pre = [self.decoder(ps.to(torch.float32), speech_lengths)[0] for ps in feature_pre]
             else:
                 # some models (e.g. neural beamformer trained with mask loss)
                 # do not predict time-domain signal in the training stage
@@ -319,14 +327,16 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                         for ps in feature_pre
                     ]
                 else:
-                    speech_pre = [self.decoder(ps, speech_lengths)[0] for ps in feature_pre]
+                    # speech_pre = [self.decoder(ps, speech_lengths)[0] for ps in feature_pre]
+                    with torch.cuda.amp.autocast(enabled=False):
+                        if is_complex(feature_pre[0]):
+                            speech_pre = [self.decoder(ps.to(torch.complex64), speech_lengths)[0] for ps in feature_pre]
+                        else:
+                            speech_pre = [self.decoder(ps.to(torch.float32), speech_lengths)[0] for ps in feature_pre]
                     # when using float16, istft returns complex32, maybe bug?
-                    for s in range(len(speech_pre)):
-                        # print(speech_pre[s].dtype)
-                        # print(abs(s.real).sum(), abs(s.imag).sum())
-                        from espnet2.enh.layers.complex_utils import is_complex
-                        if is_complex(speech_pre[s]):
-                            speech_pre[s] = speech_pre[s].to(torch.float16)
+                    # for s in range(len(speech_pre)):
+                    #     if is_complex(speech_pre[s]):
+                    #         speech_pre[s] = speech_pre[s].to(torch.float16)
             else:
                 # some models (e.g. neural beamformer trained with mask loss)
                 # do not predict time-domain signal in the training stage
