@@ -11,7 +11,6 @@ import humanfriendly
 import numpy as np
 import torch
 import yaml
-from tqdm import trange
 from typeguard import check_argument_types
 
 from espnet2.enh.loss.criterions.tf_domain import FrequencyDomainMSE
@@ -19,7 +18,6 @@ from espnet2.enh.loss.criterions.time_domain import SISNRLoss
 from espnet2.enh.loss.wrappers.pit_solver import PITSolver
 from espnet2.fileio.sound_scp import SoundScpWriter
 from espnet2.fileio.datadir_writer import DatadirWriter
-from espnet2.tasks.enh import EnhancementTask
 from espnet2.tasks.enh_tse_ss import TargetSpeakerExtractionAndEnhancementTask as TSESSTask
 from espnet2.torch_utils.device_funcs import to_device
 from espnet2.torch_utils.set_all_random_seed import set_all_random_seed
@@ -86,6 +84,7 @@ def build_model_from_args_and_file(task, args, model_file, device):
         model.load_state_dict(torch.load(model_file, map_location=device))
     return model
 
+
 def compensate_under_estimation(ref, inf, perm):
     true_num_spk = ref.shape[0]
     est_num_spk = inf.shape[0]
@@ -102,6 +101,7 @@ def compensate_under_estimation(ref, inf, perm):
     inf = torch.cat(copies, dim=0)
     assert inf.shape == ref.shape, "something wrong"
     return inf
+
 
 def select_sources(ref, inf, mix, writer, max_num_spk, sample_rate, key):
     true_num_spk = len(ref)
@@ -137,7 +137,7 @@ def select_sources(ref, inf, mix, writer, max_num_spk, sample_rate, key):
         inf = inf[perm]
 
     assert ref.shape == inf.shape, f"{ref.shape}, {inf.shape}"
-    writer[f"Est_num_spk"][key] = str(est_num_spk)
+    writer["Est_num_spk"][key] = str(est_num_spk)
 
     assert inf.ndim == 2, "shape should be (n_spk, n_samples) and there must not be the batch dimension"
     inf = [w[None].cpu().numpy() for w in inf]
@@ -233,7 +233,7 @@ class SeparateSpeech:
 
         self.segmenting = segment_size is not None and hop_size is not None
 
-        self.use_true_nspk = use_true_nspk # if true, number of speakers are informed to model
+        self.use_true_nspk = use_true_nspk  # if true, number of speakers are informed to model
 
     @torch.no_grad()
     def __call__(
@@ -285,7 +285,7 @@ class SeparateSpeech:
             ]  # list[(batch, sample)]
         else:
             # waves = [w.cpu().numpy() for w in waves]
-            waves = [w in waves]
+            waves = [w for w in waves]
 
         return waves
 
@@ -368,7 +368,6 @@ def inference(
     hop_size: Optional[float],
     normalize_segment_scale: bool,
     use_true_nspk: bool,
-    eval_mixture: bool,
     show_progressbar: bool,
     ref_channel: Optional[int],
     normalize_output_wav: bool,
@@ -432,23 +431,31 @@ def inference(
     # 4. Start for-loop
     output_dir = Path(output_dir).expanduser().resolve()
     # score_output_dir = Path(score_output_dir).expanduser().resolve()
-    if not eval_mixture:
-        writers = []
-        for i in range(max_num_spk):
-            writers.append(
-                SoundScpWriter(f"{output_dir}/wavs/{i + 1}", f"{output_dir}/spk{i + 1}.scp")
-            )
+
+    # if n_mix was specified during training, we evaluate only N-mix data
+    n_mix = separate_speech.enh_train_args.n_mix
+    if n_mix is not None:
+        assert max_num_spk == max(n_mix), (max_num_spk, n_mix)
+        logging.info(f"Inference is done with only {n_mix}-mix data")
+    writers = []
+    for i in range(max_num_spk):
+        writers.append(
+            SoundScpWriter(f"{output_dir}/wavs/{i + 1}", f"{output_dir}/spk{i + 1}.scp")
+        )
 
     import tqdm
     with DatadirWriter(score_output_dir) as score_writer:
         for i, (keys, batch) in tqdm.tqdm(enumerate(loader)):
+            # skip samples when evaluating only N-mix
+            if n_mix is not None and int(keys[0][0]) not in n_mix:
+                continue
             logging.info(f"[{i}] Enhancing {keys}")
             assert isinstance(batch, dict), type(batch)
             assert all(isinstance(s, str) for s in keys), keys
             _bs = len(next(iter(batch.values())))
             assert len(keys) == _bs, f"{len(keys)} != {_bs}"
             ref = {k: v for k, v in batch.items() if re.match(r"speech_ref\d+", k)}
-            batch = {k: v for k, v in batch.items() if k=="speech_mix"}
+            batch = {k: v for k, v in batch.items() if k == "speech_mix"}
 
             # remove dummy reference
             ref = [
@@ -459,30 +466,23 @@ def inference(
                 for spk in range(max_num_spk)
                 if "speech_ref{}".format(spk + 1) in ref
             ]
-            ref = [s for s in ref if s.shape[-1]>1]
+            ref = [s for s in ref if s.shape[-1] > 1]
             num_spk = len(ref)
 
-            if eval_mixture:
-                # assuming batch size is 1
-                mixture = list(batch.values())[0]
-                waves = [mixture for n in range(num_spk)]
-            else:
-                waves = separate_speech(**batch, fs=fs, num_spk=num_spk)
+            # separation
+            waves = separate_speech(**batch, fs=fs, num_spk=num_spk)
             waves = select_sources(ref, waves, batch["speech_mix"], score_writer, max_num_spk, fs, keys[0])
-            if not eval_mixture:
-                for spk in range(max_num_spk):
-                    if spk < len(waves):
-                        for b in range(batch_size):
-                            writers[spk][keys[b]] = fs, waves[spk][b]
-                    else:
-                        writers[spk].fscp.write(f"{keys[b]} dummy\n")
-                # for spk, w in enumerate(waves):
-                #     for b in range(batch_size):
-                #         writers[spk][keys[b]] = fs, w[b]
 
-    if not eval_mixture:
-        for writer in writers:
-            writer.close()
+            # save audios and handle dummy samples
+            for spk in range(max_num_spk):
+                if spk < len(waves):
+                    for b in range(batch_size):
+                        writers[spk][keys[b]] = fs, waves[spk][b]
+                else:
+                    writers[spk].fscp.write(f"{keys[b]} dummy\n")
+
+    for writer in writers:
+        writer.close()
 
 
 def get_parser():
@@ -540,7 +540,7 @@ def get_parser():
     group.add_argument(
         "--normalize_output_wav",
         type=str2bool,
-        default=False,
+        default=True,
         help="Whether to normalize the predicted wav to [-1~1]",
     )
 
@@ -579,12 +579,6 @@ def get_parser():
         default=False,
         help="Whether to inform true number of speakers to model",
     )
-    group.add_argument(
-        "--eval_mixture",
-        type=str2bool,
-        default=False,
-        help="Whether to evaluate mixtures instead of separated signals",
-    )
 
     group = parser.add_argument_group("Data loading related")
     group.add_argument(
@@ -609,7 +603,7 @@ def get_parser():
     group.add_argument(
         "--normalize_segment_scale",
         type=str2bool,
-        default=True,
+        default=False,
         help="Whether to normalize the energy of the separated streams in each segment",
     )
     group.add_argument(

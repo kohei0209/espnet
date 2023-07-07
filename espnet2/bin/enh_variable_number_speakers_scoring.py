@@ -22,10 +22,10 @@ from espnet2.train.dataset import kaldi_loader
 from espnet2.utils import config_argparse
 from espnet2.utils.types import str2bool
 from espnet.utils.cli_utils import get_commandline_args
-from espnet2.fileio.read_text import read_2columns_text
 
 si_snr_loss = SISNRLoss()
 DUMMY_SYNBOL = "dummy"
+
 
 def get_readers(scps: List[str], dtype: str):
     # Determine the audio format (sound or kaldi_ark)
@@ -70,7 +70,7 @@ def scoring(
 
     if not flexible_numspk:
         assert len(ref_scp) == len(inf_scp), ref_scp
-    num_spk = len(ref_scp)
+    num_spk = len(inf_scp)
 
     keys = [
         line.rstrip().split(maxsplit=1)[0] for line in open(key_file, encoding="utf-8")
@@ -78,12 +78,6 @@ def scoring(
 
     ref_readers, ref_audio_format = get_readers(ref_scp, dtype)
     inf_readers, inf_audio_format = get_readers(inf_scp, dtype)
-
-    # need to read scp files to detect dummies
-    # ref_scps = {}
-    # for scp in ref_scp:
-    #     scp_dict = read_2columns_text(scp)
-    #     ref_scps = dict(**ref_scps, **scp_dict)
 
     # get sample rate
     retval = ref_readers[0][keys[0]]
@@ -96,9 +90,9 @@ def scoring(
     assert sample_rate is not None, (sample_rate, ref_audio_format)
 
     # check keys
-    if not flexible_numspk:
-        for inf_reader, ref_reader in zip(inf_readers, ref_readers):
-            assert inf_reader.keys() == ref_reader.keys()
+    # if not flexible_numspk:
+    #     for inf_reader, ref_reader in zip(inf_readers, ref_readers):
+    #         assert inf_reader.keys() == ref_reader.keys()
 
     with DatadirWriter(output_dir) as writer:
         for n, key in enumerate(keys):

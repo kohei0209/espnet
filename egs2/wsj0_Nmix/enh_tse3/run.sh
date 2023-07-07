@@ -15,7 +15,7 @@ test_sets="tt_${min_or_max}_${sample_rate} "
 
 config=./conf/tuning/train_enh_trial.yaml
 
-./enh3.sh \
+./enh2.sh \
     --is_tse_task false \
     --is_tse_and_ss_task true \
     --train_set "${train_set}" \
