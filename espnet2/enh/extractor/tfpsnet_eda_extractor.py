@@ -97,12 +97,13 @@ class TFPSNetEDAExtractor(AbsExtractor, AbsSeparator):
             )
 
         # gated output layer
-        self.output = torch.nn.Sequential(
-            torch.nn.Conv1d(enc_channels, enc_channels, 1), torch.nn.Tanh()
-        )
-        self.output_gate = torch.nn.Sequential(
-            torch.nn.Conv1d(enc_channels, enc_channels, 1), torch.nn.Sigmoid()
-        )
+        if masking:
+            self.output = torch.nn.Sequential(
+                torch.nn.Conv1d(enc_channels, enc_channels, 1), torch.nn.Tanh()
+            )
+            self.output_gate = torch.nn.Sequential(
+                torch.nn.Conv1d(enc_channels, enc_channels, 1), torch.nn.Sigmoid()
+            )
 
         if nonlinear not in ("sigmoid", "relu", "tanh", "linear"):
             raise ValueError("Not supporting nonlinear={}".format(nonlinear))

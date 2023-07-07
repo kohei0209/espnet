@@ -426,7 +426,8 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
             if i == self.i_eda_layer:
                 orig_B = B
                 H = output.shape[-3]
-                aggregated_sequence = self.sequence_aggregation(output.permute(0, 2, 3, 1))
+                # aggregated_sequence = self.sequence_aggregation(output.permute(0, 2, 3, 1))
+                aggregated_sequence = self.sequence_aggregation(output.transpose(-1, -3))
                 attractors, probabilities = self.eda(aggregated_sequence, num_spk=num_spk)
                 output = output[..., None, :, :, :] * attractors[..., :-1, :, None, None] # [B, J, N, L, K]
                 output = output.view(-1, H, F, T)

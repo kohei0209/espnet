@@ -328,6 +328,7 @@ class TimeDomainL1(TimeDomainLoss):
         only_for_test=False,
         is_noise_loss=False,
         is_dereverb_loss=False,
+        mean_or_sum="sum",
     ):
         _name = "TD_L1_loss" if name is None else name
         super().__init__(
@@ -336,6 +337,12 @@ class TimeDomainL1(TimeDomainLoss):
             is_noise_loss=is_noise_loss,
             is_dereverb_loss=is_dereverb_loss,
         )
+        if mean_or_sum == "sum":
+            self.aggregate_func = torch.sum
+        elif mean_or_sum == "mean":
+            self.aggregate_func = torch.mean
+        else:
+            raise NotImplementedError()
 
     def forward(self, ref, inf) -> torch.Tensor:
         """Time-domain L1 loss forward.
@@ -350,9 +357,9 @@ class TimeDomainL1(TimeDomainLoss):
 
         l1loss = abs(ref - inf)
         if ref.dim() == 3:
-            l1loss = l1loss.mean(dim=[1, 2])
+            l1loss = self.aggregate_func(l1loss, dim=(1, 2))
         elif ref.dim() == 2:
-            l1loss = l1loss.mean(dim=1)
+            l1loss = self.aggregate_func(l1loss, dim=1)
         else:
             raise ValueError(
                 "Invalid input shape: ref={}, inf={}".format(ref.shape, inf.shape)

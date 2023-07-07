@@ -11,7 +11,6 @@ from espnet2.enh.layers.dptnet import DPTNet
 from espnet2.enh.layers.dptnet_eda import DPTNet_EDA_Informed
 from espnet2.enh.extractor.abs_extractor import AbsExtractor
 from espnet2.enh.separator.abs_separator import AbsSeparator
-from espnet.nets.pytorch_backend.nets_utils import make_pad_mask
 
 is_torch_1_9_plus = V(torch.__version__) >= V("1.9.0")
 
@@ -69,6 +68,8 @@ class DPTNetEDAExtractor(AbsExtractor, AbsSeparator):
 
         self.post_enc_relu = post_enc_relu
         self.enc_LN = choose_norm(norm_type, input_dim)
+        if i_adapt_layer is not None:
+            self.enc_LN_aux = choose_norm(norm_type, input_dim)
         self.dptnet = DPTNet_EDA_Informed(
             rnn_type=rnn_type,
             input_size=input_dim,
@@ -166,8 +167,15 @@ class DPTNetEDAExtractor(AbsExtractor, AbsSeparator):
 
         is_tse = input_aux is not None
         if is_tse:
-            aux_feature = abs(input_aux) if is_complex(input_aux) else input_aux
+            if is_complex(input_aux):
+                aux_feature = abs(input_aux)
+            elif self.post_enc_relu:
+                aux_feature = torch.nn.functional.relu(input_aux)
+            else:
+                aux_feature = input_aux
+            # aux_feature = abs(input_aux) if is_complex(input_aux) else input_aux
             aux_feature = aux_feature.transpose(1, 2)  # B, N, T
+            aux_feature = self.enc_LN_aux(aux_feature)
             aux_segmented = self.split_feature(aux_feature)  # B, N, L, K: batch, hidden_dim, segment_len, num_segments
             enroll_emb = self.auxiliary_net(aux_segmented)  # B, N, L, K
         else:
