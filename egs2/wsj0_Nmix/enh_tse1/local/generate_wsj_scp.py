@@ -37,7 +37,7 @@ for cond in ["tr", "cv", "tt"]:
     # make scp output folder
     scp_output_folder = {}
     for len_mode in args.len_mode:
-        scp_output_folder[len_mode] = args.scp_output_dir / f"{cond}_min_{args.samplerate // 1000}k"
+        scp_output_folder[len_mode] = args.scp_output_dir / f"{cond}_{len_mode}_{args.samplerate // 1000}k"
         scp_output_folder[len_mode].mkdir(exist_ok=True)
         # prepare writers
         mode = "w" if not (scp_output_folder[len_mode] / "wav_org.scp").exists() else "a"
@@ -48,6 +48,7 @@ for cond in ["tr", "cv", "tt"]:
         spk_scp_writers = []
         for i in range(args.n_src):
             spk_metadata_writers.append(open(args.metadata_output_folder / f"mix_{args.n_src}_spk_{len_mode}_{cond}_{i}", mode, encoding="UTF-8"))
+        for i in range(5):
             spk_scp_writers.append(open(scp_output_folder[len_mode] / f"spk{i+1}_org.scp", mode, encoding="UTF-8"))
 
         for idx in tqdm(range(len(mix_df))):
@@ -91,4 +92,5 @@ for cond in ["tr", "cv", "tt"]:
         spk2utt_writer.close()
         for i in range(args.n_src):
             spk_metadata_writers[i].close()
+        for i in range(5):
             spk_scp_writers[i].close()

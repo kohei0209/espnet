@@ -113,7 +113,6 @@ def average_nbest_models(
 def average_selected_models(
     output_dir: Path,
     epochs: Union[Collection[int], int],
-    nbest: Union[Collection[int], int],
     suffix: Optional[str] = None,
 ) -> None:
     """Generate averaged model from n-best models
@@ -127,77 +126,58 @@ def average_selected_models(
         suffix: A suffix added to the averaged model file name
     """
     assert check_argument_types()
-    if isinstance(nbest, int):
-        nbests = [nbest]
-    else:
-        nbests = list(nbest)
-    if len(nbests) == 0:
-        warnings.warn("At least 1 nbest values are required")
-        nbests = [1]
     if suffix is not None:
         suffix = suffix + "."
     else:
         suffix = ""
 
-    # 1. Get nbests: List[Tuple[str, str, List[Tuple[epoch, value]]]]
-    nbest_epochs = epochs
-
     _loaded = {}
-    for ph, cr, epoch_and_values in nbest_epochs:
-        _nbests = [i for i in nbests if i <= len(epoch_and_values)]
-        if len(_nbests) == 0:
-            _nbests = [1]
+    avg = None
+    for e in epochs:
+        if e not in _loaded:
+            _loaded[e] = torch.load(
+                output_dir / f"{e}epoch.pth",
+                map_location="cpu",
+            )
+        states = _loaded[e]
 
-        for n in _nbests:
-            if n == 0:
-                continue
-            elif n == 1:
-                # The averaged model is same as the best model
-                e, _ = epoch_and_values[0]
-                op = output_dir / f"{e}epoch.pth"
-                sym_op = output_dir / f"{ph}.{cr}.ave_1best.{suffix}pth"
-                if sym_op.is_symlink() or sym_op.exists():
-                    sym_op.unlink()
-                sym_op.symlink_to(op.name)
-            else:
-                op = output_dir / f"{ph}.{cr}.ave_{n}best.{suffix}pth"
-                logging.info(
-                    f"Averaging {n}best models: " f'criterion="{ph}.{cr}": {op}'
-                )
+        if avg is None:
+            avg = states
+        else:
+            # Accumulated
+            for k in avg:
+                avg[k] = avg[k] + states[k]
+    for k in avg:
+        if str(avg[k].dtype).startswith("torch.int"):
+            # For int type, not averaged, but only accumulated.
+            # e.g. BatchNorm.num_batches_tracked
+            # (If there are any cases that requires averaging
+            #  or the other reducing method, e.g. max/min, for integer type,
+            #  please report.)
+            pass
+        else:
+            avg[k] = avg[k] / len(epochs)
 
-                avg = None
-                # 2.a. Averaging model
-                for e, _ in epoch_and_values[:n]:
-                    if e not in _loaded:
-                        _loaded[e] = torch.load(
-                            output_dir / f"{e}epoch.pth",
-                            map_location="cpu",
-                        )
-                    states = _loaded[e]
+    # 2.b. Save the ave model and create a symlink
+    for e in range(len(epochs)):
+        epochs[e] = str(epochs[e])
+    epochs = "_".join(epochs)
+    op = output_dir / f"ave_epochs_{epochs}.{suffix}pth"
+    torch.save(avg, op)
 
-                    if avg is None:
-                        avg = states
-                    else:
-                        # Accumulated
-                        for k in avg:
-                            avg[k] = avg[k] + states[k]
-                for k in avg:
-                    if str(avg[k].dtype).startswith("torch.int"):
-                        # For int type, not averaged, but only accumulated.
-                        # e.g. BatchNorm.num_batches_tracked
-                        # (If there are any cases that requires averaging
-                        #  or the other reducing method, e.g. max/min, for integer type,
-                        #  please report.)
-                        pass
-                    else:
-                        avg[k] = avg[k] / n
+    # 3. *.*.ave.pth is a symlink to the max ave model
+    # op = output_dir / f"{ph}.{cr}.ave_{max(_nbests)}best.{suffix}pth"
+    # sym_op = output_dir / f"{ph}.{cr}.ave.{suffix}pth"
+    # if sym_op.is_symlink() or sym_op.exists():
+    #     sym_op.unlink()
+    # sym_op.symlink_to(op.name)
 
-                # 2.b. Save the ave model and create a symlink
-                torch.save(avg, op)
 
-        # 3. *.*.ave.pth is a symlink to the max ave model
-        op = output_dir / f"{ph}.{cr}.ave_{max(_nbests)}best.{suffix}pth"
-        sym_op = output_dir / f"{ph}.{cr}.ave.{suffix}pth"
-        if sym_op.is_symlink() or sym_op.exists():
-            sym_op.unlink()
-        sym_op.symlink_to(op.name)
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--exp_dir", type=Path, required=True)
+    parser.add_argument("--epochs", type=int, nargs="*", required=True)
+    args = parser.parse_args()
+    average_selected_models(args.exp_dir, args.epochs)

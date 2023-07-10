@@ -1,5 +1,5 @@
 optim: adam
-max_epoch: 50
+max_epoch: 175
 batch_type: folded
 sort_batch: descending
 batch_size: 4
@@ -12,13 +12,15 @@ chunk_excluded_key_prefixes:
 - "enroll_ref"
 - "utt2category"
 # - "speech_ref"
+n_mix:
+- 5
 num_workers: 8
 optim_conf:
-    lr: 1.5e-04
+    lr: 4.0e-04
     eps: 1.0e-08
     weight_decay: 0
 unused_parameters: true
-patience: 10
+patience: 20
 accum_grad: 1
 grad_clip: 5.0
 val_scheduler_criterion:
@@ -35,16 +37,16 @@ keep_nbest_models: 10
 scheduler: warmupsteplr
 scheduler_conf:
    # for WarmupLR
-   warmup_steps: 20000
+   warmup_steps: 5000
    # for StepLR
-   steps_per_epoch: 20120
+   steps_per_epoch: 5000
    step_size: 2
    gamma: 0.98
 
 model_conf:
     num_spk: 5
     share_encoder: true
-    task: tse
+    task: enh
     normalization: true
 
 train_spk2enroll: data/tr_min_8k/spk2enroll.json
@@ -77,12 +79,9 @@ extractor_conf:
     nonlinear: prelu
     triple_path: false
     i_eda_layer: 3
-    i_adapt_layer: 4
-    adapt_layer_type: attn_improved
+    i_adapt_layer: null
+    adapt_layer_type: attn
     adapt_enroll_dim: 64
-    adapt_attention_dim: 512
-    adapt_hidden_dim: 512
-    adapt_softmax_temp: 1
 
 # A list for criterions
 # The overlall loss in the multi-task learning will be:
@@ -100,20 +99,4 @@ criterions:
 
 use_wandb: true
 wandb_project: use_preliminary_wsj
-wandb_name: DPTNet_TSE_EDA4thLayer_ImprovedAdapt5thlayer_2-5mix
-
-init_param:
-- ./exp/enh_enh_dptnet_eda4thlayer_2-5mix_1bce_raw/175epoch.pth
-resume: false
-freeze_param:
-- encoder
-- extractor.enc_LN
-- extractor.dptnet.row_transformer
-- extractor.dptnet.col_transformer
-- extractor.dptnet.output
-- extractor.dptnet.sequence_aggregation
-- extractor.dptnet.eda
-- extractor.output
-- extractor.nonlinear
-- extractor.output_gate
-- decoder
+wandb_name: DPTNet_Sep_EDA4thLayer_5mix_1BCELoss_StepLr5000steps

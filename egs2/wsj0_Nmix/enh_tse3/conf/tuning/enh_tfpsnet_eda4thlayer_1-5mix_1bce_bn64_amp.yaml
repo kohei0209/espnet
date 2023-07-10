@@ -1,85 +1,80 @@
 optim: adam
-max_epoch: 200
+max_epoch: 50
 batch_type: folded
 sort_batch: descending
-batch_size: 4
-valid_batch_size: 4
+batch_size: 1
+valid_batch_size: 1
 iterator_type: sequence
 chunk_length: 32000
 # exclude keys "enroll_ref", "enroll_ref1", "enroll_ref2", ...
 # from the length consistency check in ChunkIterFactory
 chunk_excluded_key_prefixes:
-- "enroll_ref"
-- "utt2category"
+  - "enroll_ref"
+  - "utt2category"
 # - "speech_ref"
 num_workers: 8
 optim_conf:
-    lr: 4.0e-04
-    eps: 1.0e-04
-    weight_decay: 0
+  lr: 2.0e-04
+  eps: 1.0e-04
+  weight_decay: 0
 unused_parameters: true
-patience: 10
+patience: 5
 accum_grad: 1
 grad_clip: 5.0
 val_scheduler_criterion:
-- valid
-- loss
+  - valid
+  - loss
 best_model_criterion:
--   - valid
+  - - valid
     - snr
     - max
--   - valid
+  - - valid
     - loss
     - min
-keep_nbest_models: 10
+keep_nbest_models: 5
 scheduler: warmupreducelr
 scheduler_conf:
-   # for WarmupLR
-   warmup_steps: 10000
-   # for StepLR
-   factor: 0.7
-   patience: 3
-   eps: 1e-4
+  # for WarmupLR
+  warmup_steps: 10000
+  factor: 0.7
+  patience: 1
 
 model_conf:
-    num_spk: 5
-    share_encoder: true
-    task: enh
-    normalization: true
+  num_spk: 5
+  share_encoder: true
+  task: enh
+  normalization: true
 
 train_spk2enroll: data/tr_min_8k/spk2enroll.json
 enroll_segment: 32000
 load_spk_embedding: false
 load_all_speakers: true
 
-encoder: conv
+encoder: stft
 encoder_conf:
-    channel: 64
-    kernel_size: 8
-    stride: 4
-decoder: conv
+  n_fft: 256
+  hop_length: 128
+decoder: stft
 decoder_conf:
-    channel: 64
-    kernel_size: 8
-    stride: 4
-extractor: dptnet_eda
+  n_fft: 256
+  hop_length: 128
+extractor: tfpsnet_eda
 extractor_conf:
-    num_spk: 5
-    layer: 6
-    rnn_type: lstm
-    bidirectional: True  # this is for the inter-block rnn
-    unit: 128
-    segment_size: 150
-    att_heads: 4
-    dropout: 0
-    activation: relu
-    norm_type: gLN
-    nonlinear: prelu
-    triple_path: false
-    i_eda_layer: 3
-    i_adapt_layer: null
-    adapt_layer_type: attn
-    adapt_enroll_dim: 64
+  num_spk: 1
+  enc_channels: 256
+  bottleneck_size: 64
+  separator_type: transformer
+  tfps_blocks: [1, 1, 1, 1, 1, 1]
+  masking: false
+  rnn_type: lstm
+  bidirectional: true
+  unit: 128
+  dropout: 0.0
+  norm_type: gLN
+  nonlinear: relu
+  i_eda_layer: 3
+  i_adapt_layer: null
+  adapt_enroll_dim: 64
 
 # A list for criterions
 # The overlall loss in the multi-task learning will be:
@@ -87,17 +82,19 @@ extractor_conf:
 # The default `weight` for each sub-loss is 1.0
 criterions:
   # The first criterion
-  - name: snr
+  - name: l1_td
     conf:
-      eps: 1.0e-4
+      mean_or_sum: sum
     wrapper: pit
     wrapper_conf:
-      weight: 1.0
+      weight: 0
       independent_perm: true
   - name: mr_l1_tfd
     conf:
       eps: 1.0e-4
       scale_invariant: false
+      window_sz: [256, 512, 768, 1024]
+      hop_sz: null
       mean_or_sum: mean
     wrapper: pit
     wrapper_conf:
@@ -114,4 +111,4 @@ criterions:
 use_amp: true
 use_wandb: true
 wandb_project: use_preliminary_wsj
-wandb_name: NoisyRev_DPTNetEnc8samples_Sep_EDA4thLayer_2-5mix_SNR+MRLoss+1BCELoss_AMPfloat16_ReduceLR
+wandb_name: NoisyRev_TFPSNet_Sep_EDA4thLayer_1-5mix_10MRl1Loss+1BCELoss_ReduceLR_lr2e-4_AMPfloat16

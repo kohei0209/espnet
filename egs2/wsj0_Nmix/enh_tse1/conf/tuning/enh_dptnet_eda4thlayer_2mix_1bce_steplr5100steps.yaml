@@ -1,9 +1,9 @@
 optim: adam
-max_epoch: 100
+max_epoch: 175
 batch_type: folded
 sort_batch: descending
 batch_size: 4
-valid_batch_size: 4
+valid_batch_size: 2
 iterator_type: sequence
 chunk_length: 32000
 # exclude keys "enroll_ref", "enroll_ref1", "enroll_ref2", ...
@@ -12,13 +12,15 @@ chunk_excluded_key_prefixes:
 - "enroll_ref"
 - "utt2category"
 # - "speech_ref"
+n_mix:
+- 2
 num_workers: 8
 optim_conf:
-    lr: 5.0e-05
+    lr: 4.0e-04
     eps: 1.0e-08
     weight_decay: 0
 unused_parameters: true
-patience: 10
+patience: 20
 accum_grad: 1
 grad_clip: 5.0
 val_scheduler_criterion:
@@ -35,9 +37,9 @@ keep_nbest_models: 10
 scheduler: warmupsteplr
 scheduler_conf:
    # for WarmupLR
-   warmup_steps: 20000
+   warmup_steps: 500
    # for StepLR
-   steps_per_epoch: 22632
+   steps_per_epoch: 5100
    step_size: 2
    gamma: 0.98
 
@@ -97,8 +99,4 @@ criterions:
 
 use_wandb: true
 wandb_project: use_preliminary_wsj
-wandb_name: NoisyRev2_DPTNet_Sep_EDA4thLayer_1-5mix_SISNR+1BCELoss_woAMP_StepLR_lr5e-5
-
-init_param:
-- ../enh_tse1/exp/enh_enh_dptnet_eda4thlayer_2-5mix_1bce_raw/175epoch.pth
-resume: false
+wandb_name: DPTNet_Sep_EDA4thLayer_2mix_1BCELoss_StepLr5100steps

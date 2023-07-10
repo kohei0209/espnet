@@ -741,8 +741,8 @@ class EncoderDecoderAttractor(nn.Module):
     def forward(self, input, num_spk=None):
         batch_size, C, H = input.shape
         output = input
-        if self.lstm_encoder.training:
-            output = output[..., torch.randperm(C), :]  # shuffle chunk order
+        # if self.lstm_encoder.training:
+        output = output[..., torch.randperm(C), :]  # shuffle chunk order
         _, state = self.lstm_encoder(output)
         zero_input = input.new_zeros((batch_size, 1, H))
         outputs, existence_probabilities = [], []

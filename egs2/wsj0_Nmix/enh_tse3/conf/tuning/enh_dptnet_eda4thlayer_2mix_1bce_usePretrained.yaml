@@ -1,5 +1,5 @@
 optim: adam
-max_epoch: 100
+max_epoch: 200
 batch_type: folded
 sort_batch: descending
 batch_size: 4
@@ -103,4 +103,3 @@ wandb_name: NoisyRev2_DPTNet_Sep_EDA4thLayer_2mix_SISNR+1BCELoss_woAMP_StepLR_lr
 
 init_param:
 - ../enh_tse1/exp/enh_enh_dptnet_eda4thlayer_2-5mix_1bce_raw/175epoch.pth
-resume: false

@@ -30,11 +30,6 @@ wsj_full_wav=$3
 wsj_mix_wav=$4
 nsrc=$5
 
-echo "Downloading WSJ0_mixture scripts."
-mkdir -p ${dir}
-
-git clone https://github.com/mpariente/pywsj0-mix.git ${dir}
-
 
 # echo "WSJ0 wav file."
 # local/convert2wav.sh ${wsj0_path} ${wsj_full_wav} || exit 1;

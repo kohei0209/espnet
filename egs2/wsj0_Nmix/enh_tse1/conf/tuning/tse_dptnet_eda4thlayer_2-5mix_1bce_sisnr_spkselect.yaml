@@ -1,3 +1,4 @@
+task: &task tse
 optim: adam
 max_epoch: 50
 batch_type: folded
@@ -11,6 +12,7 @@ chunk_length: 32000
 chunk_excluded_key_prefixes:
     - "enroll_ref"
     - "utt2category"
+    - "num_spk"
 # - "speech_ref"
 num_workers: 8
 optim_conf:
@@ -44,13 +46,13 @@ scheduler_conf:
 model_conf:
     num_spk: 5
     share_encoder: true
-    task: tse
+    task: *task
     normalization: true
 
 train_spk2enroll: data/tr_min_8k/spk2enroll.json
 enroll_segment: 32000
 load_spk_embedding: false
-load_all_speakers: true
+load_all_speakers: false
 
 encoder: conv
 encoder_conf:

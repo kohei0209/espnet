@@ -9,8 +9,8 @@ chunk_length: 32000
 # exclude keys "enroll_ref", "enroll_ref1", "enroll_ref2", ...
 # from the length consistency check in ChunkIterFactory
 chunk_excluded_key_prefixes:
-- "enroll_ref"
-- "utt2category"
+    - "enroll_ref"
+    - "utt2category"
 # - "speech_ref"
 num_workers: 8
 optim_conf:
@@ -22,22 +22,22 @@ patience: 5
 accum_grad: 1
 grad_clip: 5.0
 val_scheduler_criterion:
-- valid
-- loss
-best_model_criterion:
--   - valid
-    - snr
-    - max
--   - valid
+    - valid
     - loss
-    - min
+best_model_criterion:
+    - - valid
+      - snr
+      - max
+    - - valid
+      - loss
+      - min
 keep_nbest_models: 10
 scheduler: warmupreducelr
 scheduler_conf:
-   # for WarmupLR
-   warmup_steps: 10000
-   factor: 0.7
-   patience: 1
+    # for WarmupLR
+    warmup_steps: 10000
+    factor: 0.7
+    patience: 1
 
 model_conf:
     num_spk: 5
@@ -54,7 +54,7 @@ encoder: stft
 encoder_conf:
     n_fft: 256
     hop_length: 128
-decoder: stft p
+decoder: stft
 decoder_conf:
     n_fft: 256
     hop_length: 128
@@ -80,14 +80,14 @@ extractor_conf:
 # loss = weight_1 * loss_1 + ... + weight_N * loss_N
 # The default `weight` for each sub-loss is 1.0
 criterions:
-  # The first criterion
-  - name: si_snr
-    conf:
-      eps: 1.0e-8
-    wrapper: pit
-    wrapper_conf:
-      weight: 1
-      independent_perm: true
+    # The first criterion
+    - name: si_snr
+      conf:
+          eps: 1.0e-8
+      wrapper: pit
+      wrapper_conf:
+          weight: 1
+          independent_perm: true
 
 use_amp: false
 use_wandb: true

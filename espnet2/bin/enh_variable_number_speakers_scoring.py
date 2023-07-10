@@ -69,7 +69,7 @@ def scoring(
     )
 
     if not flexible_numspk:
-        assert len(ref_scp) == len(inf_scp), ref_scp
+        assert len(ref_scp) == len(inf_scp), (ref_scp, inf_scp)
     num_spk = len(inf_scp)
 
     keys = [
