@@ -108,7 +108,6 @@ def average_nbest_models(
         sym_op.symlink_to(op.name)
 
 
-
 @torch.no_grad()
 def average_selected_models(
     output_dir: Path,
