@@ -92,3 +92,8 @@ tools/miniconda
 
 mywork/
 *.onnx
+tools/Miniconda3-latest-Linux-x86_64.sh
+tools/activate_python_torch10.sh
+egs2/wsj0_Nmix/enh_tse1_spkemb/
+egs2/wsj0_Nmix/enh_tse2/
+egs2/wsj0_Nmix/enh_tse4/

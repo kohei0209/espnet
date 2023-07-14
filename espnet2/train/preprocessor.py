@@ -1224,7 +1224,7 @@ class TSEPreprocessor(EnhPreprocessor):
                 "Be cautious when applying RIRs on the fly in the TSE task! "
                 "Please ensure `speech_ref` sums up to `speech_mix` for each sample."
             )
-
+        print(train_spk2enroll, flush=True)
         if train:
             if train_spk2enroll is None:
                 logging.info("Using fixed enrollment for each sample")
@@ -1443,10 +1443,10 @@ class EnhTsePreprocessor(TSEPreprocessor):
                     assert self.speech_segment is not None, self.speech_segment
                     data[name] = data[name][..., start:start+frames]
                 logging.warning(
-                    f"Something wrong {data[name]} {data[name]}, spk{spk}, {org_len} {start}, {frames}"
+                    f"Something wrong {data[name]} {data[name]}, spk{spk}, {mix_len} {start}, {frames}"
                 )
-                # raise RuntimeError(f"Something wrong 2: {data[name]}, spk{spk}, {org_len} {start}, {frames}")
-            assert data["speech_mix"].shape[-1] == data[name].shape[-1], (org_len, data["speech_mix"].shape[-1], data[name].shape[-1], start, frames)
+                # raise RuntimeError(f"Something wrong 2: {data[name]}, spk{spk}, {mix_len} {start}, {frames}")
+            assert data["speech_mix"].shape[-1] == data[name].shape[-1], (mix_len, data["speech_mix"].shape[-1], data[name].shape[-1], start, frames)
             # data[name] = soundfile.read(data[name])[0]
         # print(data["speech_mix"].shape,  data["speech_ref1"].shape, start, frames, flush=True)
 
@@ -1481,35 +1481,54 @@ class EnhTsePreprocessor(TSEPreprocessor):
                 data[k] = np.zeros(1)
 
         # speech segment for sequence-based iterator
-        if self.train and self.speech_segment is not None:
-            org_len = data["speech_mix"].shape[-1]
-            if org_len > self.speech_segment:
-                start = np.random.randint(0, org_len - self.speech_segment)
-                frames = self.speech_segment
-                data["speech_mix"] = data["speech_mix"][..., start:start+frames]
+        has_zero_ref = True  # to avoid zero-reference when using partly-overlapped data
+        mix_len = data["speech_mix"].shape[-1]
+        offset = mix_len - self.speech_segment
+        while has_zero_ref:
+            loaded_audios = {}
+            if self.train and self.speech_segment is not None:
+                mix_len = data["speech_mix"].shape[-1]
+                if offset > 0:
+                    start = np.random.randint(0, offset)
+                    frames = self.speech_segment
+                    loaded_audios["speech_mix"] = data["speech_mix"][..., start:start + frames]
+                else:
+                    start, frames = 0, -1
+                    loaded_audios["speech_mix"] = data["speech_mix"]
             else:
                 start, frames = 0, -1
-        else:
-            start, frames = 0, -1
+                loaded_audios["speech_mix"] = data["speech_mix"]
 
-        num_spk = len(ref_names)
-        data["num_spk"] = np.array([num_spk])
-        for spk in range(1, num_spk + 1):
-            name = f"speech_ref{spk}"
-            # make sure the dummy references only exist after the real ones
-            assert name in data, "dummy reference must appear after the real ones"
-            # Read the speech references
-            try:
-                data[name] = soundfile.read(data[name], start=start, frames=frames, dtype=np.float32, always_2d=False)[0]
-            except:
-                data[name] = soundfile.read(data[name], dtype=np.float32, always_2d=False)[0]
-                if frames != -1:
-                    assert self.speech_segment is not None, self.speech_segment
-                    data[name] = data[name][..., start:start+frames]
-                logging.warning(
-                    f"Something wrong {name}, spk{spk}, {org_len} {start}, {frames}"
-                )
-            assert data["speech_mix"].shape[-1] == data[name].shape[-1], (org_len, data["speech_mix"].shape[-1], data[name].shape[-1], start, frames)
+            num_spk = len(ref_names)
+            data["num_spk"] = np.array([num_spk])
+            zero_ref = []
+            for spk in range(1, num_spk + 1):
+                name = f"speech_ref{spk}"
+                # make sure the dummy references only exist after the real ones
+                assert name in data, "dummy reference must appear after the real ones"
+                # Read the speech references
+                try:
+                    loaded_audios[name] = soundfile.read(data[name], start=start, frames=frames, dtype=np.float32, always_2d=False)[0]
+                except:
+                    loaded_audios[name] = soundfile.read(data[name], dtype=np.float32, always_2d=False)[0]
+                    if frames != -1:
+                        assert self.speech_segment is not None, self.speech_segment
+                        loaded_audios[name] = loaded_audios[name][..., start:start + frames]
+                    logging.warning(
+                        f"Something wrong {name}, spk{spk}, {mix_len} {start}, {frames}"
+                    )
+                assert loaded_audios["speech_mix"].shape[-1] == loaded_audios[name].shape[-1], (mix_len, data["speech_mix"].shape[-1], loaded_audios[name].shape[-1], start, frames)
+                zero_ref.append((abs(loaded_audios[name]).sum() == 0.))
+
+            # if there is no zero-reference, break the loop
+            if not np.any(zero_ref):
+                has_zero_ref = False
+                for spk in range(1, num_spk + 1):
+                    name = f"speech_ref{spk}"
+                    data[name] = loaded_audios[name]
+                data["speech_mix"] = loaded_audios["speech_mix"]
+            else:
+                offset = start
 
         assert check_return_type(data)
         return data
