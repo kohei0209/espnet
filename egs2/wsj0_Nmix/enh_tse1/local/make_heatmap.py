@@ -8,6 +8,7 @@ import numpy as np
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--exp_dir", type=Path, required=True)
+parser.add_argument("--title", type=str, required=True)
 args = parser.parse_args()
 
 results_dirs = glob.glob(str(args.exp_dir) + "/*mix")
@@ -27,7 +28,7 @@ for i, results_dir in enumerate(results_dirs):
 ax = sns.heatmap(confusion_matrix, annot=True, cmap='Blues', fmt='.2f', vmin=0.0, cbar=False, square=True)
 for text in ax.texts:
     text.set_fontsize(16)
-ax.set_title("Speaker counting accuracy [%]", fontsize=18)
+ax.set_title(f"{args.title}", fontsize=18)
 ax.set_xlabel("Estimated number of speakers", fontsize=16)
 ax.set_xticklabels(num_spk_list)
 ax.set_ylabel("Oracle number of speakers", fontsize=16)
