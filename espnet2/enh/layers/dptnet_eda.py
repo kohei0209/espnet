@@ -14,7 +14,7 @@ from espnet.nets.pytorch_backend.nets_utils import get_activation
 
 from espnet2.enh.layers.adapt_layers import make_adapt_layer
 from espnet2.enh.layers.dprnn_eda import SequenceAggregation, EncoderDecoderAttractor
-from espnet2.enh.layers.dptnet import DPTNet
+
 
 class ImprovedTransformerLayer(nn.Module):
     """Container module of the (improved) Transformer proposed in [1].
@@ -169,7 +169,7 @@ class DPTNet_EDA_Informed(nn.Module):
                 )
             )
         if triple_path:
-            for i in range(num_layers-i_eda_layer-1):
+            for i in range(num_layers - i_eda_layer - 1):
                 self.chan_transformer.append(
                     ImprovedTransformerLayer(
                         rnn_type,
@@ -258,14 +258,14 @@ class DPTNet_EDA_Informed(nn.Module):
             if i == self.i_eda_layer:
                 aggregated_sequence = self.sequence_aggregation(output.transpose(-1, -3))
                 attractors, probabilities = self.eda(aggregated_sequence, num_spk=num_spk)
-                output = output[..., None, :, :, :] * attractors[..., :-1, :, None, None] # [B, J, N, L, K]
+                output = output[..., None, :, :, :] * attractors[..., :-1, :, None, None]  # [B, J, N, L, K]
                 # output, probabilities = self.eda_process(output, num_spk)
                 output = output.view(-1, hidden_dim, dim1, dim2)
                 batch = output.shape[0]
 
             # triple-path block
             if self.triple_path and i > self.i_eda_layer:
-                output = self.channel_chunk_process(output, i-self.i_eda_layer-1, org_batch)
+                output = self.channel_chunk_process(output, i - self.i_eda_layer - 1, org_batch)
 
             # target speaker extraction part
             if i == self.i_adapt_layer and is_tse:
@@ -275,7 +275,7 @@ class DPTNet_EDA_Informed(nn.Module):
                 output = self.adapt_layer(output, enroll_emb)
                 output = output.permute(0, 3, 1, 2)
                 if self.adapt_layer_type == "attn_improved":
-                    output = self.conditioning_model(output, enroll_emb.mean(dim=(1,2), keepdim=True))
+                    output = self.conditioning_model(output, enroll_emb.mean(dim=(1, 2), keepdim=True))
 
         if self.i_eda_layer is None:
             probabilities = None
@@ -314,16 +314,16 @@ class DPTNet_EDA_Informed(nn.Module):
             attractor, probability = self.eda[i](aggregated_sequence, num_spk=num_spk)
             attractors.append(attractor)
             probabilities.append(probability)
-            num_attractors.append(attractor.shape[-2]) # estimated number of speakers
+            num_attractors.append(attractor.shape[-2])  # estimated number of speakers
         # we use mode value as the estimated number of speakers
         output, count = 0., 0
         est_num_spk = statistics.mode(num_attractors)
         for i in range(self.num_eda_modules):
             if num_attractors[i] == est_num_spk:
-                output = output + (x[..., None, :, :, :] * attractors[i][..., :-1, :, None, None]) # [B, J, N, L, K]
+                output = output + (x[..., None, :, :, :] * attractors[i][..., :-1, :, None, None])  # [B, J, N, L, K]
                 count += 1
         output = output / count
-        probabilities = torch.cat(probabilities, dim=0) # concat along batch dim
+        probabilities = torch.cat(probabilities, dim=0)  # concat along batch dim
         return output, probabilities
 
 

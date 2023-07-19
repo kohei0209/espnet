@@ -104,21 +104,21 @@ class TFPSNetEDAExtractor(AbsExtractor, AbsSeparator):
                 adapt_hidden_dim=adapt_hidden_dim,
                 adapt_softmax_temp=adapt_softmax_temp,
             )
-            if i_adapt_layer is not None:
-                self.auxiliary_net = TFPSNet_Transformer(
-                    enc_channels,
-                    bottleneck_size,
-                    output_size=enc_channels,
-                    tfps_blocks=(1,),
-                    # Transformer-specific arguments
-                    rnn_type=rnn_type,
-                    hidden_size=unit,
-                    att_heads=4,
-                    dropout=dropout,
-                    activation="relu",
-                    bidirectional=bidirectional,
-                    norm_type=norm_type,
-                )
+            # if i_adapt_layer is not None:
+            #     self.auxiliary_net = TFPSNet_Transformer(
+            #         enc_channels,
+            #         bottleneck_size,
+            #         output_size=enc_channels,
+            #         tfps_blocks=(1,),
+            #         # Transformer-specific arguments
+            #         rnn_type=rnn_type,
+            #         hidden_size=unit,
+            #         att_heads=4,
+            #         dropout=dropout,
+            #         activation="relu",
+            #         bidirectional=bidirectional,
+            #         norm_type=norm_type,
+            #     )
 
         # gated output layer
         if masking:
@@ -199,7 +199,7 @@ class TFPSNetEDAExtractor(AbsExtractor, AbsSeparator):
                 enroll_emb = torch.nn.functional.pad(enroll_emb, (0, 5), mode="circular")
                 enroll_emb = self.post_encoder(enroll_emb)  # B*T, enc_channels, F
                 enroll_emb = enroll_emb.reshape(B, T_emb, -1, F).moveaxis(1, -1)  # B, enc_channels, F, T
-                enroll_emb = self.auxiliary_net(enroll_emb)
+                # enroll_emb = self.auxiliary_net(enroll_emb)
             else:
                 # real and imag parts
                 raise NotImplementedError("Input must be complex")

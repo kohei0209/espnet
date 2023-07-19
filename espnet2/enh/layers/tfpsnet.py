@@ -412,6 +412,17 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
                 "hidden_dim": adapt_hidden_dim,
                 "softmax_temp": adapt_softmax_temp,
             }
+            self.auxiliary_net = TFPSBlockType1(
+                SingleTransformer,
+                rnn_type,
+                bottleneck_size,
+                att_heads,
+                hidden_size,
+                dropout=dropout,
+                activation=activation,
+                bidirectional=bidirectional,
+                norm=norm_type,
+            )
             # prepare additional processing block
             if adapt_layer_type == "tfattn_improved":
                 self.conditional_model = Conditional_TFPSNet_Transformer(
@@ -467,10 +478,16 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
                 T_enroll = enroll_emb.shape[-1]
                 enroll_emb = self.layer_norm(enroll_emb.reshape(orig_B, N, -1))
                 enroll_emb = self.bottleneck_conv1x1(enroll_emb).reshape(orig_B, -1, F, T_enroll)  # B, BN, F, T
+                # print("Grad", output.requires_grad, enroll_emb.requires_grad, flush=True)
+                enroll_emb = self.auxiliary_net(enroll_emb)
                 output = output.view(orig_B, -1, H, F, T)
+                # print("Grad", output.requires_grad, enroll_emb.requires_grad, flush=True)
+                # print(f"bef {output.shape}", flush=True)
                 output = self.adapt_layer(output, enroll_emb)
+                # print(f"af1 {output.shape}", flush=True)
                 if self.adapt_layer_type == "tfattn_improved":
-                    output = self.conditional_model(output, enroll_emb.mean(dim=(-1), keepdim=True))
+                    output = self.conditional_model(output, enroll_emb.mean(dim=(-1, -2), keepdim=True))
+                    # print(f"af2 {output.shape}", flush=True)
 
         if self.i_eda_layer is None:
             probabilities = None

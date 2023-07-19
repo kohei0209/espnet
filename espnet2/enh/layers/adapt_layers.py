@@ -305,9 +305,10 @@ class TFAttentionAdaptLayer(nn.Module):
             batch, num_spk, hidden, freq, frame = main0.shape
             main0 = main0.transpose(-1, -3)  # (batch, num_spk, frame, freq, hidden)
             enroll0 = enroll0.transpose(-1, -3)  # (batch, frame, freq, hidden)
+            mean_dim = (-2, -3)
             s_v = self.mlp_v(main0)  # (batch, num_spk, frame, freq, hidden)
-            s_iv = self.mlp_iv(main0).mean(dim=-3, keepdim=True)  # (batch, num_spk, 1, freq, hidden)
-            s_aux = self.mlp_aux(enroll0).mean(dim=-3, keepdim=True)  # (batch, 1, freq, hidden)
+            s_iv = self.mlp_iv(main0).mean(dim=mean_dim, keepdim=True)  # (batch, num_spk, 1, freq, hidden)
+            s_aux = self.mlp_aux(enroll0).mean(dim=mean_dim, keepdim=True)  # (batch, 1, freq, hidden)
 
             # e: (batch, num_spk, num_enroll, frame, freq, hidden)
             # a: (batch, num_spk, num_enroll, frame, freq, 1)
