@@ -82,7 +82,7 @@ init_param=
 
 # Enhancement related
 inference_args="--normalize_output_wav true"
-inference_model=valid.loss.best.pth
+inference_model=
 download_model=
 
 # Evaluation related
@@ -748,7 +748,7 @@ if ! "${skip_eval}"; then
         mkdir -p "${enh_exp}"; echo "${run_args} --stage 7 \"\$@\"; exit \$?" > "${enh_exp}/run_enhance.sh"; chmod +x "${enh_exp}/run_enhance.sh"
         _opts=
 
-        for task in enh; do
+        for task in enh tse; do
             for use_true_nspk in true false; do
                 # for dset in "${valid_set}" ${test_sets}; do
                 for dset in ${test_sets}; do
@@ -866,8 +866,8 @@ if ! "${skip_eval}"; then
         # score_obs=true: Scoring for observation signal
         # score_obs=false: Scoring for enhanced signal
         for score_obs in true false; do
-            for task in enh; do
-                for use_true_nspk in true; do
+            for task in enh tse; do
+                for use_true_nspk in true false; do
                     # for dset in "${valid_set}" ${test_sets}; do
                     for dset in ${test_sets}; do
                         for nmix in ${inf_nums}; do
@@ -1009,8 +1009,8 @@ if "${score_with_asr}"; then
         fi
         # score_obs=true: Scoring for observation signal
         # score_obs=false: Scoring for enhanced signal
-        for score_obs in false; do
-            for task in enh; do
+        for score_obs in true false; do
+            for task in enh tse; do
                 for use_true_nspk in true false; do
                     # for dset in "${valid_set}" ${test_sets}; do
                     for dset in ${test_sets}; do
@@ -1025,7 +1025,8 @@ if "${score_with_asr}"; then
                                     continue
                                 fi
                             else
-                                _dir=""${enh_exp}/${inference_asr_tag}/${dset}"/${task}/${nmix}mix"
+                                # _dir="${enh_exp}/${inference_asr_tag}/${dset}/${task}/${nmix}mix"
+                                _dir="${enh_exp}/${inference_tag}_${dset}/${task}/${nmix}mix"
                                 if ${use_true_nspk}; then
                                     _dir="${_dir}/with_true_numspk"
                                 else
@@ -1034,7 +1035,7 @@ if "${score_with_asr}"; then
                             fi
 
                             for spk in $(seq "${nmix}"); do
-                                _ddir=${_dir}/spk_${spk}
+                                _ddir=${_dir}/${inference_asr_tag}/spk_${spk}
                                 _logdir="${_ddir}/logdir"
                                 _decode_dir="${_ddir}/decode"
                                 mkdir -p ${_ddir}
@@ -1046,7 +1047,7 @@ if "${score_with_asr}"; then
                                     # Using same wav.scp for all speakers
                                     cp "${_data}/wav.scp" "${_ddir}/wav.scp"
                                 else
-                                    cp "${enh_exp}/${inference_tag}_${dset}/scoring/wav_spk${spk}" "${_ddir}/wav.scp"
+                                    cp "${_dir}/scoring/wav_spk${spk}" "${_ddir}/wav.scp"
                                 fi
                                 if [ ! -e "${_data}/text_spk${nmix}" ]; then
                                     python ./local/split_wav_scp.py \
@@ -1058,12 +1059,18 @@ if "${score_with_asr}"; then
                                 mv ${_ddir}/wav.scp ${_ddir}/wav_ori.scp
 
                                 if ${use_whisper}; then
+                                    if ${score_obs} && [ -e "${_ddir}/score_wer/result.txt" ]; then
+                                        log "${_ddir}/score_wer/result.txt already exists. The decoding for observation will be skipped"
+                                        continue
+                                    fi
+                                    # text normalization
                                     log "Decoding started... Using Whisper"
                                     python -m espnet2.bin.whisper_normalize \
                                         ${_data}/text_spk${spk} --output_file ${_ddir}/ref_text_spk${spk}
+                                    # decoding
                                     if ${score_obs}; then
                                         if [ ${spk} -ge 2 ]; then
-                                            cp "${_dir}/spk_1/text_spk1" "${_ddir}/text_spk${spk}"
+                                            cp "${_dir}/${inference_asr_tag}/spk_1/text_spk1" "${_ddir}/text_spk${spk}"
                                         else
                                             python -m espnet2.bin.whisper_asr \
                                                 "${_data}/wav.scp" --output_file "${_ddir}/text_spk${spk}" --device cuda
@@ -1073,15 +1080,12 @@ if "${score_with_asr}"; then
                                         python -m espnet2.bin.whisper_asr \
                                             "${_dir}/spk${spk}.scp" --output_file "${_ddir}/text_spk${spk}" --device cuda
                                     fi
-
+                                    # scoring
                                     mkdir -p "${_ddir}/score_wer"
                                     paste <(<${_ddir}/text_spk${spk} python -m espnet2.bin.tokenize_text -f 2- --input - --output - --token_type word --remove_non_linguistic_symbols true) <(<${_ddir}/utt2spk awk '{ print "(" $2 "-" $1 ")" }') > ${_ddir}/score_wer/hyp.trn
                                     paste <(<${_ddir}/ref_text_spk${spk} python -m espnet2.bin.tokenize_text -f 2- --input - --output - --token_type word --remove_non_linguistic_symbols true) <(<${_ddir}/utt2spk awk '{ print "(" $2 "-" $1 ")" }') > ${_ddir}/score_wer/ref.trn
-                                    sclite -r "${_ddir}/score_wer/ref.trn" trn -h "${_ddir}/score_wer/hyp.trn" trn -i rm -o all stdout > "${_ddir}/score_wer/result_spk${spk}.txt"
+                                    sclite -r "${_ddir}/score_wer/ref.trn" trn -h "${_ddir}/score_wer/hyp.trn" trn -i rm -o all stdout > "${_ddir}/score_wer/result.txt"
 
-                                    r=$(grep -e Avg -e SPKR -m 2 "${_ddir}/score_wer/result_spk${spk}.txt")
-                                    data_row=$(echo "$r" | awk 'NR == 2 { print $0 }')
-                                    cat $data_row >> "${_dir}/results.txt"
                                 else
                                     line=$(head -n 1 "${_ddir}/wav_ori.scp" | awk '{print $NF}')
                                     if [[ "$(basename "$line")" =~ ^.*\.ark(:[[:digit:]]+)?$ ]]; then
@@ -1139,6 +1143,9 @@ if "${score_with_asr}"; then
                                     done
                                 fi
                             done
+                            if ${use_whisper}; then
+                                python ./local/merge_wer.py ${_dir}/${inference_asr_tag} ${nmix}
+                            fi
                         done
                     done
                 done
