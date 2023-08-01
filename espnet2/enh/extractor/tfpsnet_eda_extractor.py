@@ -9,7 +9,7 @@ from torch_complex.tensor import ComplexTensor
 
 from espnet2.enh.layers.complex_utils import is_complex
 from espnet2.enh.layers.complex_utils import new_complex_like
-from espnet2.enh.layers.tfpsnet import TFPSNet_Transformer_EDA, TFPSNet_Transformer
+from espnet2.enh.layers.tfpsnet import TFPSNet_Transformer_EDA
 from espnet2.enh.separator.abs_separator import AbsSeparator
 from espnet2.enh.extractor.abs_extractor import AbsExtractor
 

@@ -400,6 +400,12 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
         if i_eda_layer is not None:
             self.sequence_aggregation = SequenceAggregation(bottleneck_size)
             self.eda = EncoderDecoderAttractor(bottleneck_size)
+            # self.film = FiLM(bottleneck_size, bottleneck_size, bottleneck_size, skip_connection=False)
+            # self.post_eda = nn.Sequential(
+            #     nn.Linear(bottleneck_size, bottleneck_size),
+            #     nn.PReLU(),
+            #     nn.Linear(bottleneck_size, bottleneck_size)
+            # )
 
         # tse related params
         self.i_adapt_layer = i_adapt_layer
@@ -467,27 +473,24 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
             if i == self.i_eda_layer:
                 orig_B = B
                 H = output.shape[-3]
-                # aggregated_sequence = self.sequence_aggregation(output.permute(0, 2, 3, 1))
                 aggregated_sequence = self.sequence_aggregation(output.transpose(-1, -3))
                 attractors, probabilities = self.eda(aggregated_sequence, num_spk=num_spk)
                 output = output[..., None, :, :, :] * attractors[..., :-1, :, None, None]  # [B, J, N, L, K]
                 output = output.view(-1, H, F, T)
+                # attractors = self.post_eda(attractors[..., :-1, :])  # [B, J, H]
+                # output = self.film(output[..., None, :, :, :].transpose(-1, -3), attractors[..., None, None, :])  # move H to last dim
+                # output = output.transpose(-1, -3).contiguous().view(-1, H, F, T)
                 B = output.shape[0]
             # target speaker extraction part
             if i == self.i_adapt_layer and is_tse:
                 T_enroll = enroll_emb.shape[-1]
                 enroll_emb = self.layer_norm(enroll_emb.reshape(orig_B, N, -1))
                 enroll_emb = self.bottleneck_conv1x1(enroll_emb).reshape(orig_B, -1, F, T_enroll)  # B, BN, F, T
-                # print("Grad", output.requires_grad, enroll_emb.requires_grad, flush=True)
                 enroll_emb = self.auxiliary_net(enroll_emb)
                 output = output.view(orig_B, -1, H, F, T)
-                # print("Grad", output.requires_grad, enroll_emb.requires_grad, flush=True)
-                # print(f"bef {output.shape}", flush=True)
                 output = self.adapt_layer(output, enroll_emb)
-                # print(f"af1 {output.shape}", flush=True)
                 if self.adapt_layer_type == "tfattn_improved":
                     output = self.conditional_model(output, enroll_emb.mean(dim=(-1, -2), keepdim=True))
-                    # print(f"af2 {output.shape}", flush=True)
 
         if self.i_eda_layer is None:
             probabilities = None

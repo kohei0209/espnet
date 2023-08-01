@@ -7,7 +7,7 @@ from torch_complex.tensor import ComplexTensor
 
 from espnet2.enh.layers.complex_utils import is_complex
 from espnet2.enh.layers.dprnn_eda import DPRNN, merge_feature, split_feature
-from espnet2.enh.layers.dprnn_eda import DPRNN_EDA_Informed, DPRNN_EDA_Informed_Separated
+from espnet2.enh.layers.dprnn_eda import DPRNN_EDA_Informed
 from espnet2.enh.extractor.abs_extractor import AbsExtractor
 from espnet2.enh.separator.abs_separator import AbsSeparator
 from espnet.nets.pytorch_backend.nets_utils import make_pad_mask
@@ -60,7 +60,7 @@ class DPRNNEDAExtractor(AbsExtractor, AbsSeparator):
 
         if output_size is None:
             output_size = input_dim
-        
+
         self.dprnn = DPRNN_EDA_Informed(
             rnn_type=rnn_type,
             input_size=input_dim,
@@ -76,23 +76,6 @@ class DPRNNEDAExtractor(AbsExtractor, AbsSeparator):
             adapt_layer_type=adapt_layer_type,
             adapt_enroll_dim=adapt_enroll_dim,
         )
-        '''
-        self.dprnn = DPRNN_EDA_Informed_Separated(
-            rnn_type=rnn_type,
-            input_size=input_dim,
-            hidden_size=unit,
-            output_size=output_size,
-            segment_size=segment_size,
-            dropout=dropout,
-            num_layers=layer,
-            bidirectional=bidirectional,
-            i_eda_layer=i_eda_layer,
-            i_adapt_layer=i_adapt_layer,
-            adapt_layer_type=adapt_layer_type,
-            adapt_enroll_dim=adapt_enroll_dim,
-            separate_output_side=True,
-        )
-        '''
 
         # Auxiliary network
         self.auxiliary_net = DPRNN(
