@@ -269,6 +269,9 @@ class SeparateSpeech:
         speech_mix = to_device(speech_mix, device=self.device)
         lengths = to_device(lengths, device=self.device)
 
+        from espnet2.enh.espnet_model_tse_ss import normalization
+        speech_mix, mean, std = normalization(speech_mix)
+
         # b. Separation
         if self.use_true_nspk:
             assert num_spk is not None, "num_spk must be specified"

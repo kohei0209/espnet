@@ -84,7 +84,6 @@ def build_model_from_args_and_file(task, args, model_file, device):
     return model
 
 
-
 class SeparateSpeech:
     """SeparateSpeech class
 
@@ -236,6 +235,10 @@ class SeparateSpeech:
         lengths = to_device(lengths, device=self.device)
         enroll_ref = to_device(enroll_ref, device=self.device)
         aux_lengths = to_device(aux_lengths, device=self.device)
+
+        from espnet2.enh.espnet_model_tse_ss import normalization
+        speech_mix, mean, std = normalization(speech_mix)
+        enroll_ref = [normalization(enroll_ref[spk])[0] for spk in range(len(enroll_ref))]
         if self.enh_model.share_encoder:
             feats_aux, flens_aux = zip(
                 *[
