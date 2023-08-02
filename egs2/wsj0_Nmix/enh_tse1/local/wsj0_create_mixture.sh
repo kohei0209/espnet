@@ -31,9 +31,6 @@ wsj_mix_wav=$4
 nsrc=$5
 
 
-# echo "WSJ0 wav file."
-# local/convert2wav.sh ${wsj0_path} ${wsj_full_wav} || exit 1;
-
 echo "Creating ${nsrc}-speaker mixtures"
 
 sample_rate_int=${sample_rate%"k"}

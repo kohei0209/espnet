@@ -21,8 +21,8 @@ set -e
 set -u
 set -o pipefail
 
-find_transcripts=`pwd`/find_transcripts.pl
-normalize_transcript=`pwd`/normalize_transcript.pl
+find_transcripts=`pwd`/local/find_transcripts.pl
+normalize_transcript=`pwd`/local/normalize_transcript.pl
 
 wavdir=$1
 srcdir=$2
@@ -32,34 +32,30 @@ tr="tr_${min_or_max}_${sample_rate}"
 cv="cv_${min_or_max}_${sample_rate}"
 tt="tt_${min_or_max}_${sample_rate}"
 
-# check if the wav dir exists.
-# for f in $wavdir/tr $wavdir/cv $wavdir/tt; do
-#   if [ ! -d $wavdir ]; then
-#     echo "Error: $wavdir is not a directory."
-#     exit 1;
-#   fi
-# done
-
-# check if the script file exists.
-# for f in $srcdir/mix_2_spk_${min_or_max}_tr_mix $srcdir/mix_2_spk_${min_or_max}_cv_mix $srcdir/mix_2_spk_${min_or_max}_tt_mix; do
-#   if [ ! -f $f ]; then
-#     echo "Could not find $f.";
-#     exit 1;
-#   fi
-# done
-
 data=./data
 
+
+# sort scp files and remove old ones
 for x in tr cv tt; do
   target_folder=$(eval echo \$$x)
   sort ${data}/${target_folder}/wav_org.scp > ${data}/${target_folder}/wav.scp
+  rm ${data}/${target_folder}/wav_org.scp
   for n_src in 1 2 3 4 5; do
     sort ${data}/${target_folder}/spk${n_src}_org.scp > ${data}/${target_folder}/spk${n_src}.scp
     rm ${data}/${target_folder}/spk${n_src}_org.scp
   done
   sort -k1 -u ${data}/${target_folder}/utt2spk_org > ${data}/${target_folder}/utt2spk
   rm ${data}/${target_folder}/utt2spk_org
+  # make spk2utt from utt2spk
   utt2spk_to_spk2utt.pl ${data}/${target_folder}/utt2spk > ${data}/${target_folder}/spk2utt
+done
+
+# create utt2category file
+for x in tr cv tt; do
+  target_folder=$(eval echo \$$x)
+  python local/prepare_utt2category.py \
+    ${data}/${target_folder}/wav.scp \
+    --output_dir ${data}/${target_folder} || exit 1;
 done
 
 # transcriptions (only for 'max' version)
@@ -92,11 +88,10 @@ done
 # change to the original path
 cd ..
 
-awk '(ARGIND==1) {txt[$1]=$0} (ARGIND==2) {split($1, lst, "_"); utt1=lst[3]; text=txt[utt1]; print($1, text)}' tmp/si_tr_s.txt ${data}/${tr}/wav.scp | awk '{$2=""; print $0}' > ${data}/${tr}/text_spk1
-awk '(ARGIND==1) {txt[$1]=$0} (ARGIND==2) {split($1, lst, "_"); utt2=lst[5]; text=txt[utt2]; print($1, text)}' tmp/si_tr_s.txt ${data}/${tr}/wav.scp | awk '{$2=""; print $0}' > ${data}/${tr}/text_spk2
-awk '(ARGIND==1) {txt[$1]=$0} (ARGIND==2) {split($1, lst, "_"); utt1=lst[3]; text=txt[utt1]; print($1, text)}' tmp/si_tr_s.txt ${data}/${cv}/wav.scp | awk '{$2=""; print $0}' > ${data}/${cv}/text_spk1
-awk '(ARGIND==1) {txt[$1]=$0} (ARGIND==2) {split($1, lst, "_"); utt2=lst[5]; text=txt[utt2]; print($1, text)}' tmp/si_tr_s.txt ${data}/${cv}/wav.scp | awk '{$2=""; print $0}' > ${data}/${cv}/text_spk2
-awk '(ARGIND<=2) {txt[$1]=$0} (ARGIND==3) {split($1, lst, "_"); utt1=lst[3]; text=txt[utt1]; print($1, text)}' tmp/si_dt_05.txt tmp/si_et_05.txt ${data}/${tt}/wav.scp | awk '{$2=""; print $0}' > ${data}/${tt}/text_spk1
-awk '(ARGIND<=2) {txt[$1]=$0} (ARGIND==3) {split($1, lst, "_"); utt2=lst[5]; text=txt[utt2]; print($1, text)}' tmp/si_dt_05.txt tmp/si_et_05.txt ${data}/${tt}/wav.scp | awk '{$2=""; print $0}' > ${data}/${tt}/text_spk2
+# preapre transcriptions for all of 2-5mix
+for stage in $cv $tt; do
+  python ${PWD}/local/prepare_transcription.py \
+    --transcription_folder ./tmp --wavscp_folder ./data/${stage} --num_spk 5
+done
 
-rm -r tmp
+# rm -r tmp
