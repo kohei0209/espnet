@@ -1,5 +1,6 @@
 from pathlib import Path
 import argparse
+
 from espnet2.fileio.read_text import read_2columns_text
 
 

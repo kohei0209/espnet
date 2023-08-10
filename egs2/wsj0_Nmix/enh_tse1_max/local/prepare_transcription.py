@@ -1,6 +1,7 @@
 from pathlib import Path
 from tqdm import tqdm
 import argparse
+
 from espnet2.fileio.read_text import read_2columns_text
 
 
@@ -11,7 +12,7 @@ parser.add_argument("--num_spk", type=int, default=5)
 args = parser.parse_args()
 
 transcriptions = {}
-filenames = ["si_et_05.txt", "si_dt_05.txt"]
+filenames = ["si_tr_s.txt", "si_et_05.txt", "si_dt_05.txt"]
 for filename in filenames:
     t = read_2columns_text(args.transcription_folder / filename)
     transcriptions = dict(**transcriptions, **t)

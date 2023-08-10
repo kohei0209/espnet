@@ -5,9 +5,10 @@ from pathlib import Path
 Check whether Separation pre-trained model and TSE fine-tuned model has the same paramters
 """
 
+
 def check(ss_model_path, tse_model_path):
-    ss_params = torch.load(ss_model_path)
-    tse_params = torch.load(tse_model_path)
+    ss_params = torch.load(ss_model_path, map_location="cpu")
+    tse_params = torch.load(tse_model_path, map_location="cpu")
     for key in tse_params:
         if key in ss_params:
             diff = abs(ss_params[key] - tse_params[key]).sum()

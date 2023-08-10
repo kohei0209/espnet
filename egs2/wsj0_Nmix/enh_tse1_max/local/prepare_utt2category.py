@@ -2,23 +2,19 @@ from pathlib import Path
 from espnet2.fileio.read_text import read_2columns_text
 import argparse
 
-
 def make_utt2category_file(
     wav_scp, output_dir, prefix="utt2category",
 ):
     data = read_2columns_text(wav_scp)
-    output_file = open(output_dir / f"{prefix}", "w", encoding="UTF-8")
     for i, key in enumerate(list(data.keys())):
-        utt2category = f"{key} {key[:4]}"  # e.g., key: 2mix_011_013_011c020h_0.9531_013c020l_-0.9531
-        output_file.write(utt2category + "\n")
-        # mode = "w" if i == 0 else "a"
-        # with open(output_dir / f"{prefix}", mode, encoding="UTF-8") as f:
-        #     utt2category = f"{key} {key[:4]}"  # e.g., key: 2mix_011_013_011c020h_0.9531_013c020l_-0.9531
-        #     f.write(utt2category + "\n")
-    output_file.close()
-
+        mode = "w" if i == 0 else "a"
+        with open(output_dir / f"{prefix}", mode, encoding="UTF-8") as f:
+            utt2category = f"{key} {key[:4]}" # e.g., key: 2mix_011_013_011c020h_0.9531_013c020l_-0.9531
+            f.write(utt2category + "\n")
 
 if __name__ == "__main__":
+    import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "wav_scp",

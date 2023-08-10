@@ -10,12 +10,12 @@ from espnet2.fileio.read_text import read_2columns_text
 FS_ORIG = 16000
 
 num_data = {"tr": 20000, "cv": 5000, "tt": 3000}
+len_mode = "min"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--wsj0_metadata_folder", type=Path)
 parser.add_argument("--wav_output_folder", type=Path)
 parser.add_argument("--scp_output_folder", type=Path)
-parser.add_argument("--len_mode", type=str, default="min")
 parser.add_argument("-sr", "--samplerate", default=8000, type=int)
 args = parser.parse_args()
 
@@ -28,12 +28,10 @@ def wavwrite(file, samples, sr):
     int_samples = wavwrite_quantize(samples)
     sf.write(file, int_samples, sr, subtype="PCM_16")
 
-
-len_mode = args.len_mode
 samplerate_str = str(args.samplerate // 1000) + "k"
 args.wav_output_folder = args.wav_output_folder / f"wav_{samplerate_str}" / len_mode
 
-for cond in ["tr", "cv"]:
+for cond in ["tr", "cv", "tt"]:
     wav_output_folder = args.wav_output_folder / cond
     mix_output_folder = wav_output_folder / "mix"
     speech_output_folder = wav_output_folder / "s1"

@@ -36,7 +36,7 @@ echo "Creating scp files."
 
 sample_rate_int=${sample_rate%"k"}
 sample_rate_int=$((sample_rate_int * 1000))
-python_cmd="python ${PWD}/local/generate_wsj_scp.py -p ${wsj_full_wav} -o ${wsj_mix_wav} -n ${nsrc} -sr ${sample_rate_int} --len_mode ${min_or_max} --scp_output_dir ${output_dir}"
+python_cmd="python create_wsj_scp.py -p ${wsj_full_wav} -o ${wsj_mix_wav} -n ${nsrc} -sr ${sample_rate_int} --len_mode ${min_or_max} --scp_output_dir ${output_dir}"
 
 mixfile=${dir}/mix_python.sh
 echo "#!/usr/bin/env bash" > $mixfile

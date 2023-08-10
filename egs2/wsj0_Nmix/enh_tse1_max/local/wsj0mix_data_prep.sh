@@ -32,10 +32,11 @@ tr="tr_${min_or_max}_${sample_rate}"
 cv="cv_${min_or_max}_${sample_rate}"
 tt="tt_${min_or_max}_${sample_rate}"
 
-
 data=./data
 
-for x in tr cv; do
+
+# sort scp files and remove old ones
+for x in tr cv tt; do
   target_folder=$(eval echo \$$x)
   sort ${data}/${target_folder}/wav_org.scp > ${data}/${target_folder}/wav.scp
   rm ${data}/${target_folder}/wav_org.scp
@@ -45,13 +46,23 @@ for x in tr cv; do
   done
   sort -k1 -u ${data}/${target_folder}/utt2spk_org > ${data}/${target_folder}/utt2spk
   rm ${data}/${target_folder}/utt2spk_org
+  # make spk2utt from utt2spk
   utt2spk_to_spk2utt.pl ${data}/${target_folder}/utt2spk > ${data}/${target_folder}/spk2utt
+done
+
+# create utt2category file
+for x in tr cv tt; do
+  target_folder=$(eval echo \$$x)
+  python local/prepare_utt2category.py \
+    ${data}/${target_folder}/wav.scp \
+    --output_dir ${data}/${target_folder} || exit 1;
 done
 
 # transcriptions (only for 'max' version)
 if [[ "$min_or_max" = "min" ]]; then
   exit 0
 fi
+
 
 # rm -r tmp/ 2>/dev/null
 mkdir -p tmp
@@ -77,8 +88,8 @@ done
 # change to the original path
 cd ..
 
-# for stage in $tr $cv $tt; do
-for stage in $tt; do
+# preapre transcriptions for all of 2-5mix
+for stage in $cv $tt; do
   python ${PWD}/local/prepare_transcription.py \
     --transcription_folder ./tmp --wavscp_folder ./data/${stage} --num_spk 5
 done

@@ -30,37 +30,44 @@ parser.add_argument(
     nargs="*", type=str, required=True,
     help="Specify the word that you would like to replace with"
 )
-parser.add_argument("--num_spk", type=int, required=True)
+parser.add_argument("--num_spk", type=int, default=5)
 args = parser.parse_args()
 
 
 assert len(args.source_words) == len(args.target_words)
-print(args.source_words, args.target_words)
+# print(args.source_words, args.target_words)
 
 for spk in range(args.num_spk):
-    # load enroll_spk?.scp from source folder
-    source_file = read_2columns_text(args.source_folder / f"enroll_spk{spk + 1}.scp")
-    # open enroll_spk?.scp in target folder to write
-    target_file = open(args.target_folder / f"enroll_spk{spk + 1}.scp", "w")
+    if (args.source_folder / f"enroll_spk{spk + 1}.scp").exists():
+        # load enroll_spk?.scp from source folder
+        source_file = read_2columns_text(args.source_folder / f"enroll_spk{spk + 1}.scp")
+        # open enroll_spk?.scp in target folder to write
+        target_file = open(args.target_folder / f"enroll_spk{spk + 1}.scp", "w")
+        # rewrite some specified words
+        for utt_id, audio_path in source_file.items():
+            new_audio_path = audio_path
+            for (source_word, target_word) in zip(args.source_words, args.target_words):
+                new_audio_path = new_audio_path.replace(source_word, target_word)
+            target_file.write(f"{utt_id} {new_audio_path}\n")
 
-    for utt_id, audio_path in source_file.items():
-        new_audio_path = audio_path
-        for (source_word, target_word) in zip(args.source_words, args.target_words):
-            new_audio_path = new_audio_path.replace(source_word, target_word)
-        target_file.write(f"{utt_id} {new_audio_path}\n")
+        # close the wrriten file
+        target_file.close()
 
-    # close the wrriten file
-    target_file.close()
-
-
-with open(args.source_folder / "spk2enroll.json", "r") as f:
-    source_file = json.load(f)
-new_dict = {}
-for spk_id, data in source_file.items():
-    new_dict[spk_id] = []
-    for utt_id, audio_path in data:
-        for (source_word, target_word) in zip(args.source_words, args.target_words):
-            new_audio_path = new_audio_path.replace(source_word, target_word)
-        new_dict[spk_id].append([utt_id, new_audio_path])
-with open(args.target_folder / "spk2enroll.json", "w") as f:
-    json.dump(new_dict, f, indent=4)
+# copy spk2enroll file
+if (args.source_folder / "spk2enroll.json").exists():
+    print("Copy spk2enroll.json")
+    # read original spk2enroll file
+    with open(args.source_folder / "spk2enroll.json", "r") as f:
+        source_file = json.load(f)
+    # rewrite some specified words
+    new_dict = {}
+    for spk_id, data in source_file.items():
+        new_dict[spk_id] = []
+        for utt_id, audio_path in data:
+            new_audio_path = audio_path
+            for (source_word, target_word) in zip(args.source_words, args.target_words):
+                new_audio_path = new_audio_path.replace(source_word, target_word)
+            new_dict[spk_id].append([utt_id, new_audio_path])
+    # save a new json file to target folder
+    with open(args.target_folder / "spk2enroll.json", "w") as f:
+        json.dump(new_dict, f, indent=4)
