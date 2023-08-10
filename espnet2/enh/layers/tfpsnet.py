@@ -404,22 +404,26 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
             self.sequence_aggregation = SequenceAggregation(bottleneck_size)
             self.eda = EncoderDecoderAttractor(bottleneck_size)
             self.memory_efficient_inference = memory_efficient_inference
-            # self.film = FiLM(bottleneck_size, bottleneck_size, bottleneck_size, skip_connection=False)
             # define how to use attractor
             assert sep_algo in ["gating", "multiply"]
             self.sep_algo = sep_algo
             if sep_algo == "gating":
-                self.gate_eda = nn.Sequential(
+                self.gate = nn.Sequential(
                     nn.Linear(bottleneck_size, bottleneck_size),
                     nn.PReLU(),
                     nn.Linear(bottleneck_size, bottleneck_size),
                     nn.Sigmoid(),
                 )
+                self.ff = self.gate_eda = nn.Sequential(
+                    nn.Linear(bottleneck_size, bottleneck_size),
+                    nn.PReLU(),
+                    nn.Linear(bottleneck_size, bottleneck_size),
+                )
 
         # tse related params
-        assert i_adapt_layer >= i_eda_layer, "Adapt layer must be placed after EDA"
         self.i_adapt_layer = i_adapt_layer
         if i_adapt_layer is not None:
+            assert i_adapt_layer >= i_eda_layer, "Adapt layer must be placed after EDA"
             # auxiliary network
             self.layer_norm_enroll = ChannelwiseLayerNorm(input_size)
             self.bottleneck_conv1x1_enroll = nn.Conv1d(input_size, bottleneck_size, 1, bias=False)
@@ -523,13 +527,14 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
         attractors, probabilities = self.eda(aggregated_sequence, num_spk=num_spk)
 
         # disentangling (part of internal separation) using estimated attractors
-        output = torch.unsqueeze(output, dim=1)  # (B, H, F, T) -> (B, 1, H, F, T)
+        output = torch.unsqueeze(input, dim=1)  # (B, H, F, T) -> (B, 1, H, F, T)
         attractors = attractors[..., :-1, :, None, None]  # (B, N+1, H) -> (B, N, H, 1, 1)
         if self.sep_algo == "multiply":
             output = output * attractors  # outout: (B, 1, H, F, T) -> (B, N, H, F, T)
         elif self.sep_algo == "gating":
             gate = output * attractors
-            gate = self.gate_eda(gate.transpose(-1, -3)).transpose(-1, -3)
+            gate = self.gate(gate.transpose(-1, -3)).transpose(-1, -3)
+            output = self.ff(output.transpose(-1, -3)).transpose(-1, -3)
             output = output * gate  # outout: (B, 1, H, F, T) -> (B, N, H, F, T)
 
         # each separated features are processed independently by integrating into batch dim
