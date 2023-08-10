@@ -52,6 +52,25 @@ class FoldedBatchSampler(AbsSampler):
         # Sort samples in ascending order
         # (shape order should be like (Length, Dim))
         keys = sorted(first_utt2shape, key=lambda k: first_utt2shape[k][0])
+
+        ######
+        # remove mixtures with duplication
+        ######
+        def has_speaker_duplicates(lst):
+            # no duplicates if lst has only one compoenent
+            if len(lst) <= 1:
+                return False
+            # remove duplication by changing into set
+            unique_set = set(lst)
+            # if length is different, there was duplication
+            return len(lst) != len(unique_set)
+        new_keys = []
+        for k in keys:
+            spk_ids = k.split("_")[1:(int(k[0]) + 1)]
+            if not has_speaker_duplicates(spk_ids):
+                new_keys.append(k)
+        keys = new_keys
+
         if len(keys) == 0:
             raise RuntimeError(f"0 lines found: {shape_files[0]}")
 
