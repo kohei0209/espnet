@@ -99,7 +99,6 @@ def main():
     parser = get_parser()
     args = parser.parse_args()
     args.protocols = args.protocols.split(" ")
-    # args.protocols.remove("Est_num_spk")
     results = score_summary(args)
     write_results(args.output_dir, results, args.max_num_spk)
 
