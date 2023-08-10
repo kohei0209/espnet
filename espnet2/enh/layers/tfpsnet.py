@@ -370,8 +370,11 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
         # EDA-related arguments
         i_eda_layer=4,
         num_eda_modules=1,
+        sep_algo="multiply",
+        memory_efficient_inference=True,
         # TSE-related arguments
         i_adapt_layer=4,
+        num_aux_tfps_blocks=1,
         adapt_layer_type="tfattn",
         adapt_enroll_dim=64,
         adapt_attention_dim=512,
@@ -400,43 +403,69 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
         if i_eda_layer is not None:
             self.sequence_aggregation = SequenceAggregation(bottleneck_size)
             self.eda = EncoderDecoderAttractor(bottleneck_size)
+            self.memory_efficient_inference = memory_efficient_inference
             # self.film = FiLM(bottleneck_size, bottleneck_size, bottleneck_size, skip_connection=False)
-            # self.post_eda = nn.Sequential(
-            #     nn.Linear(bottleneck_size, bottleneck_size),
-            #     nn.PReLU(),
-            #     nn.Linear(bottleneck_size, bottleneck_size)
-            # )
+            # define how to use attractor
+            assert sep_algo in ["gating", "multiply"]
+            self.sep_algo = sep_algo
+            if sep_algo == "gating":
+                self.gate_eda = nn.Sequential(
+                    nn.Linear(bottleneck_size, bottleneck_size),
+                    nn.PReLU(),
+                    nn.Linear(bottleneck_size, bottleneck_size),
+                    nn.Sigmoid(),
+                )
 
         # tse related params
+        assert i_adapt_layer >= i_eda_layer, "Adapt layer must be placed after EDA"
         self.i_adapt_layer = i_adapt_layer
         if i_adapt_layer is not None:
-            assert adapt_layer_type in ["tfattn", "tfattn_improved"]
+            # auxiliary network
+            self.layer_norm_enroll = ChannelwiseLayerNorm(input_size)
+            self.bottleneck_conv1x1_enroll = nn.Conv1d(input_size, bottleneck_size, 1, bias=False)
+            self.auxiliary_net = nn.ModuleList()
+            for i in range(num_aux_tfps_blocks):
+                self.auxiliary_net.append(
+                    TFPSBlockType1(
+                        SingleTransformer,
+                        rnn_type,
+                        bottleneck_size,
+                        att_heads,
+                        hidden_size,
+                        dropout=dropout,
+                        activation=activation,
+                        bidirectional=bidirectional,
+                        norm=norm_type,
+                    )
+                )
+
+            # adapt layer
+            assert adapt_layer_type in ["tfattn", "tfattn_improved", "crossattn", "crossattn_improved"]
             self.adapt_enroll_dim = adapt_enroll_dim
             self.adapt_layer_type = adapt_layer_type
-            adapt_layer_params = {
-                "attention_dim": adapt_attention_dim,
-                "hidden_dim": adapt_hidden_dim,
-                "softmax_temp": adapt_softmax_temp,
-            }
-            self.auxiliary_net = TFPSBlockType1(
-                SingleTransformer,
-                rnn_type,
-                bottleneck_size,
-                att_heads,
-                hidden_size,
-                dropout=dropout,
-                activation=activation,
-                bidirectional=bidirectional,
-                norm=norm_type,
-            )
-            # prepare additional processing block
-            if adapt_layer_type == "tfattn_improved":
+            # arguments
+            if "tfattn" in self.adapt_layer_type:
+                adapt_layer_params = {
+                    "attention_dim": adapt_attention_dim,
+                    "hidden_dim": adapt_hidden_dim,
+                    "softmax_temp": adapt_softmax_temp,
+                }
+            elif "crossattn" in self.adapt_layer_type:
+                adapt_layer_params = {
+                    "attention_dim": adapt_attention_dim,
+                    "mlp_hidden_dim": adapt_hidden_dim,
+                    "ff_hidden_dim": adapt_hidden_dim,
+                }
+            else:
+                raise NotImplementedError()
+            # initialize additional processing block
+            if "improved" in self.adapt_layer_type:
                 self.conditional_model = Conditional_TFPSNet_Transformer(
                     bottleneck_size,
                     adapt_hidden_dim,
                     bottleneck_size,
                     output_size,
-                    (1, ),
+                    (1, 1, ),
                     SingleTransformer,
                     rnn_type,
                     bottleneck_size,
@@ -447,55 +476,85 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
                     bidirectional=bidirectional,
                     norm=norm_type,
                 )
-                adapt_layer_type = "tfattn"
+                adapt_layer_type = adapt_layer_type.replace("_improved", "")
             # load speaker selection module
             self.adapt_layer = make_adapt_layer(
                 adapt_layer_type,
-                indim=bottleneck_size,
-                enrolldim=bottleneck_size,
-                ninputs=1,
-                adapt_layer_kwargs=adapt_layer_params,
+                indim=bottleneck_size, enrolldim=bottleneck_size,
+                ninputs=1, adapt_layer_kwargs=adapt_layer_params,
             )
-            self.layer_norm_enroll = ChannelwiseLayerNorm(adapt_enroll_dim)
-            self.bottleneck_conv1x1_enroll = nn.Conv1d(adapt_enroll_dim, bottleneck_size, 1, bias=False)
 
     def forward(self, input, enroll_emb, num_spk=None):
         is_tse = enroll_emb is not None
         B, N, F, T = input.shape
         output = self.layer_norm(input.reshape(B, N, -1))
-        output = self.bottleneck_conv1x1(output).reshape(B, -1, F, T)  # B, BN, F, T
+        output = self.bottleneck_conv1x1(output).reshape(B, -1, F, T)  # B, H, F, T
         for i, block in enumerate(self.tfps_blocks):
             if isinstance(block, TFPSBlockType2):
                 output = block(output, apply_attn_mask=True)
             else:
-                output = block(output)
-            # compute attractor
+                if not block.training and self.memory_efficient_inference:
+                    torch.cuda.empty_cache()
+                    for o in range(output.shape[0]):
+                        output[o] = block(output[[o]])[0]
+                else:
+                    output = block(output)
+
+            # EDA part (internal separation)
             if i == self.i_eda_layer:
-                orig_B = B
-                H = output.shape[-3]
-                aggregated_sequence = self.sequence_aggregation(output.transpose(-1, -3))
-                attractors, probabilities = self.eda(aggregated_sequence, num_spk=num_spk)
-                output = output[..., None, :, :, :] * attractors[..., :-1, :, None, None]  # [B, J, N, L, K]
-                output = output.view(-1, H, F, T)
-                # attractors = self.post_eda(attractors[..., :-1, :])  # [B, J, H]
-                # output = self.film(output[..., None, :, :, :].transpose(-1, -3), attractors[..., None, None, :])  # move H to last dim
-                # output = output.transpose(-1, -3).contiguous().view(-1, H, F, T)
-                B = output.shape[0]
+                output, probabilities = self.eda_internal_separation(output, num_spk=num_spk)
+
             # target speaker extraction part
             if i == self.i_adapt_layer and is_tse:
-                T_enroll = enroll_emb.shape[-1]
-                enroll_emb = self.layer_norm(enroll_emb.reshape(orig_B, N, -1))
-                enroll_emb = self.bottleneck_conv1x1(enroll_emb).reshape(orig_B, -1, F, T_enroll)  # B, BN, F, T
-                enroll_emb = self.auxiliary_net(enroll_emb)
-                output = output.view(orig_B, -1, H, F, T)
-                output = self.adapt_layer(output, enroll_emb)
-                if self.adapt_layer_type == "tfattn_improved":
-                    output = self.conditional_model(output, enroll_emb.mean(dim=(-1, -2), keepdim=True))
+                output = self.tse_module(output, enroll_emb)
 
         if self.i_eda_layer is None:
             probabilities = None
+
         output = self.output(output)  # B, output_size, dim1, dim2
         return output, probabilities
+
+    def eda_internal_separation(self, input, num_spk):
+        B, H, F, T = input.shape
+        # aggregate frequency dimension, (B, H, F, T)
+        aggregated_sequence = self.sequence_aggregation(input.transpose(-1, -3))
+
+        # estimate attractors and its corresponding existance probabilities
+        attractors, probabilities = self.eda(aggregated_sequence, num_spk=num_spk)
+
+        # disentangling (part of internal separation) using estimated attractors
+        output = torch.unsqueeze(output, dim=1)  # (B, H, F, T) -> (B, 1, H, F, T)
+        attractors = attractors[..., :-1, :, None, None]  # (B, N+1, H) -> (B, N, H, 1, 1)
+        if self.sep_algo == "multiply":
+            output = output * attractors  # outout: (B, 1, H, F, T) -> (B, N, H, F, T)
+        elif self.sep_algo == "gating":
+            gate = output * attractors
+            gate = self.gate_eda(gate.transpose(-1, -3)).transpose(-1, -3)
+            output = output * gate  # outout: (B, 1, H, F, T) -> (B, N, H, F, T)
+
+        # each separated features are processed independently by integrating into batch dim
+        output = output.view(-1, H, F, T)
+        return output, probabilities
+
+    def tse_module(self, input, enroll_emb):
+        # get shapes
+        B, N, F, T_enroll = enroll_emb.shape
+        H, T = output.shape[-3], output.shape[-1]
+
+        # process enroll embedding
+        enroll_emb = self.layer_norm_enroll(enroll_emb.reshape(B, N, -1))
+        enroll_emb = self.bottleneck_conv1x1_enroll(enroll_emb).reshape(B, H, F, T_enroll)
+        for aux_block in self.auxiliary_net:
+            enroll_emb = aux_block(enroll_emb)
+
+        # extract only the target speaker
+        output = output.view(B, -1, H, F, T)
+        output = self.adapt_layer(output, enroll_emb)
+
+        # additional enhancement layers
+        if "improved" in self.adapt_layer_type:
+            output = self.conditional_model(output, enroll_emb.mean(dim=(-1, -2), keepdim=True))
+        return output
 
 
 class Conditional_TFPSNet_Transformer(nn.Module):

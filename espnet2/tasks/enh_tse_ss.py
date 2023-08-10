@@ -466,7 +466,6 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
                     "utt2category",
                 )
             )
-            # logging.warning("Reading " + utt2category_file)
             logging.info("\n\nReading " + utt2category_file)
         else:
             logging.info("\n\nNOT Reading utt2category" + utt2category_file)
@@ -503,6 +502,7 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             num_batches_after = len(batches)
             logging.info(f"Original batches: {num_batches_before}, Current batches: {num_batches_after}")
 
+
         bs_list = [len(batch) for batch in batches]
 
         logging.info(f"[{mode}] dataset:\n{dataset}")
@@ -521,18 +521,6 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
                         f"{len(batch)} < {world_size}"
                     )
             batches = [batch[rank::world_size] for batch in batches]
-            # if utt2category_file is not None:
-            #     categories = {"2mix": [], "3mix": [], "4mix": [], "5mix":[]}
-            #     for batch in batches:
-            #         category = batch[0][:4] # e.g., 2mix, 3mix, ...
-            #         num_data = len(batch)
-            #         categories[category].append(batch[rank::world_size])
-            #     batches = []
-            #     for category, data in categories.items():
-            #         print(category, len(data), flush=True)
-            #         batches.extend(data)
-            # else:
-            #     batches = [batch[rank::world_size] for batch in batches]
 
         return SequenceIterFactory(
             dataset=dataset,

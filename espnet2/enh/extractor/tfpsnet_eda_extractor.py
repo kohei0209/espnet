@@ -36,8 +36,10 @@ class TFPSNetEDAExtractor(AbsExtractor, AbsSeparator):
         # eda realted arguments
         i_eda_layer: int = 4,
         num_eda_modules: int = 1,
+        sep_algo: str = "multiply",
         # enrollment related arguments
         i_adapt_layer: int = 4,
+        num_aux_tfps_blocks: int = 1,
         adapt_layer_type: str = "tfattn",
         adapt_enroll_dim: int = 64,
         adapt_attention_dim: int = 512,
@@ -96,29 +98,21 @@ class TFPSNetEDAExtractor(AbsExtractor, AbsSeparator):
                 # EDA-related
                 i_eda_layer=i_eda_layer,
                 num_eda_modules=num_eda_modules,
+                sep_algo = sep_algo,
                 # TSE-related
                 i_adapt_layer=i_adapt_layer,
+                num_aux_tfps_blocks=num_aux_tfps_blocks,
                 adapt_layer_type=adapt_layer_type,
                 adapt_enroll_dim=adapt_enroll_dim,
                 adapt_attention_dim=adapt_attention_dim,
                 adapt_hidden_dim=adapt_hidden_dim,
                 adapt_softmax_temp=adapt_softmax_temp,
             )
-            # if i_adapt_layer is not None:
-            #     self.auxiliary_net = TFPSNet_Transformer(
-            #         enc_channels,
-            #         bottleneck_size,
-            #         output_size=enc_channels,
-            #         tfps_blocks=(1,),
-            #         # Transformer-specific arguments
-            #         rnn_type=rnn_type,
-            #         hidden_size=unit,
-            #         att_heads=4,
-            #         dropout=dropout,
-            #         activation="relu",
-            #         bidirectional=bidirectional,
-            #         norm_type=norm_type,
-            #     )
+            if i_adapt_layer is not None:
+                self.post_encoder_enroll = torch.nn.Sequential(
+                    torch.nn.Conv1d(2, enc_channels, 6, bias=False),
+                    torch.nn.ReLU(),
+                )
 
         # gated output layer
         if masking:
@@ -197,7 +191,7 @@ class TFPSNetEDAExtractor(AbsExtractor, AbsSeparator):
                 T_emb = enroll_emb.shape[-1]
                 enroll_emb = enroll_emb.moveaxis(-1, 1).reshape(B * T_emb, 2, F)
                 enroll_emb = torch.nn.functional.pad(enroll_emb, (0, 5), mode="circular")
-                enroll_emb = self.post_encoder(enroll_emb)  # B*T, enc_channels, F
+                enroll_emb = self.post_encoder_enroll(enroll_emb)  # B*T, enc_channels, F
                 enroll_emb = enroll_emb.reshape(B, T_emb, -1, F).moveaxis(1, -1)  # B, enc_channels, F, T
                 # enroll_emb = self.auxiliary_net(enroll_emb)
             else:

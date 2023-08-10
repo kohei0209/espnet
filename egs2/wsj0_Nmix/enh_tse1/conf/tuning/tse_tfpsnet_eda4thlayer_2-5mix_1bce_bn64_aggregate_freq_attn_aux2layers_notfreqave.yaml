@@ -1,5 +1,6 @@
+task: &task tse
 optim: adam
-max_epoch: 50
+max_epoch: 20
 batch_type: folded
 sort_batch: descending
 batch_size: 1
@@ -14,7 +15,7 @@ chunk_excluded_key_prefixes:
 # - "speech_ref"
 num_workers: 8
 optim_conf:
-  lr: 2.0e-04
+  lr: 2.0e-05
   eps: 1.0e-04
   weight_decay: 0
 unused_parameters: true
@@ -31,7 +32,7 @@ best_model_criterion:
   - - valid
     - loss
     - min
-keep_nbest_models: 10
+keep_nbest_models: 5
 scheduler: warmupreducelr
 scheduler_conf:
   # for WarmupLR
@@ -42,13 +43,13 @@ scheduler_conf:
 model_conf:
   num_spk: 5
   share_encoder: true
-  task: enh
+  task: *task
   normalization: true
 
 train_spk2enroll: data/tr_min_8k/spk2enroll.json
 enroll_segment: 32000
 load_spk_embedding: false
-load_all_speakers: true
+load_all_speakers: false
 
 encoder: stft
 encoder_conf:
@@ -62,8 +63,7 @@ extractor: tfpsnet_eda
 extractor_conf:
   num_spk: 1
   enc_channels: 256
-  bottleneck_size: 64
-  masking: true
+  bottleneck_size: &bn 64
   separator_type: transformer
   tfps_blocks: [1, 1, 1, 1, 1, 1]
   rnn_type: lstm
@@ -73,8 +73,13 @@ extractor_conf:
   norm_type: gLN
   nonlinear: relu
   i_eda_layer: 3
-  i_adapt_layer: null
-  adapt_enroll_dim: 64
+  i_adapt_layer: 4
+  num_aux_tfps_blocks: 2
+  adapt_layer_type: tfattn
+  adapt_enroll_dim: *bn
+  adapt_attention_dim: 512
+  adapt_hidden_dim: 512
+  adapt_softmax_temp: 1
 
 # A list for criterions
 # The overlall loss in the multi-task learning will be:
@@ -93,4 +98,20 @@ criterions:
 use_amp: false
 use_wandb: true
 wandb_project: use_preliminary_wsj
-wandb_name: TFPSNetAggrregateF_Sep_EDA4thLayer_2-5mix_SISNRLoss+1BCELoss_ReduceLR_lr2e-4
+wandb_name: TFPSNetAggregateF_TSE_EDA4thLayer_AttnWithoutFreqAverage
+
+init_param:
+  - ./exp/enh_enh_tfpsnet_eda4thlayer_2-5mix_1bce_bn64_aggregate_freq_raw/ave_epochs_50_49_48_47_46.pth
+resume: false
+freeze_param:
+  - extractor.post_encoder
+  - extractor.tfpsnet.layer_norm
+  - extractor.tfpsnet.bottleneck_conv1x1
+  - extractor.tfpsnet.tfps_blocks
+  - extractor.tfpsnet.sequence_aggregation
+  - extractor.tfpsnet.eda
+  - extractor.tfpsnet.output
+  - extractor.pre_decoder
+  - extractor.output
+  - extractor.output_gate
+  - extractor.nonlinear

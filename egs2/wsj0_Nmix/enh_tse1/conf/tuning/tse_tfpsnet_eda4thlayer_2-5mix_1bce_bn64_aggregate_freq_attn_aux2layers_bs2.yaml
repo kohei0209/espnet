@@ -1,8 +1,9 @@
+task: &task tse
 optim: adam
-max_epoch: 175
+max_epoch: 20
 batch_type: folded
 sort_batch: descending
-batch_size: 4
+batch_size: 2
 valid_batch_size: 2
 iterator_type: sequence
 chunk_length: 32000
@@ -12,15 +13,13 @@ chunk_excluded_key_prefixes:
   - "enroll_ref"
   - "utt2category"
 # - "speech_ref"
-n_mix:
-  - 3
 num_workers: 8
 optim_conf:
-  lr: 4.0e-04
-  eps: 1.0e-08
+  lr: 2.0e-05
+  eps: 1.0e-04
   weight_decay: 0
 unused_parameters: true
-patience: 20
+patience: 100
 accum_grad: 1
 grad_clip: 5.0
 val_scheduler_criterion:
@@ -34,54 +33,53 @@ best_model_criterion:
     - loss
     - min
 keep_nbest_models: 5
-scheduler: warmupsteplr
+scheduler: warmupreducelr
 scheduler_conf:
   # for WarmupLR
-  warmup_steps: 5000
-  # for StepLR
-  steps_per_epoch: 5000
-  step_size: 2
-  gamma: 0.98
+  warmup_steps: 10000
+  factor: 0.7
+  patience: 1
 
 model_conf:
   num_spk: 5
   share_encoder: true
-  task: enh
+  task: *task
   normalization: true
 
 train_spk2enroll: data/tr_min_8k/spk2enroll.json
 enroll_segment: 32000
 load_spk_embedding: false
-load_all_speakers: true
+load_all_speakers: false
 
-encoder: conv
+encoder: stft
 encoder_conf:
-  channel: 64
-  kernel_size: 16
-  stride: 8
-decoder: conv
+  n_fft: 256
+  hop_length: 128
+decoder: stft
 decoder_conf:
-  channel: 64
-  kernel_size: 16
-  stride: 8
-extractor: dptnet_eda
+  n_fft: 256
+  hop_length: 128
+extractor: tfpsnet_eda
 extractor_conf:
-  num_spk: 5
-  layer: 6
+  num_spk: 1
+  enc_channels: 256
+  bottleneck_size: &bn 64
+  separator_type: transformer
+  tfps_blocks: [1, 1, 1, 1, 1, 1]
   rnn_type: lstm
-  bidirectional: True # this is for the inter-block rnn
+  bidirectional: true
   unit: 128
-  segment_size: 100
-  att_heads: 4
-  dropout: 0
-  activation: relu
+  dropout: 0.0
   norm_type: gLN
-  nonlinear: prelu
-  triple_path: false
+  nonlinear: relu
   i_eda_layer: 3
-  i_adapt_layer: null
-  adapt_layer_type: attn
-  adapt_enroll_dim: 64
+  i_adapt_layer: 4
+  num_aux_tfps_blocks: 2
+  adapt_layer_type: tfattn
+  adapt_enroll_dim: *bn
+  adapt_attention_dim: 512
+  adapt_hidden_dim: 512
+  adapt_softmax_temp: 1
 
 # A list for criterions
 # The overlall loss in the multi-task learning will be:
@@ -94,9 +92,26 @@ criterions:
       eps: 1.0e-7
     wrapper: pit
     wrapper_conf:
-      weight: 1.0
+      weight: 1
       independent_perm: true
 
+use_amp: false
 use_wandb: true
 wandb_project: use_preliminary_wsj
-wandb_name: DPTNet_Sep_EDA4thLayer_3mix_1BCELoss_StepLr5000steps
+wandb_name: TFPSNetAggregateF_TSE_EDA4thLayer_AttnWithoutFreqAverage_BatchSize2
+
+init_param:
+  - ./exp/enh_enh_tfpsnet_eda4thlayer_2-5mix_1bce_bn64_aggregate_freq_raw/ave_epochs_50_49_48_47_46.pth
+resume: false
+freeze_param:
+  - extractor.post_encoder
+  - extractor.tfpsnet.layer_norm
+  - extractor.tfpsnet.bottleneck_conv1x1
+  - extractor.tfpsnet.tfps_blocks
+  - extractor.tfpsnet.sequence_aggregation
+  - extractor.tfpsnet.eda
+  - extractor.tfpsnet.output
+  - extractor.pre_decoder
+  - extractor.output
+  - extractor.output_gate
+  - extractor.nonlinear
