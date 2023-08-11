@@ -15,64 +15,44 @@ log() {
 
 . ./db.sh
 
-anechoic_data_folder="../enh_tse1/data"
 data_root="${PWD}/data"
-wham_folder="../../librimix/tse1/data/wham_noise"
 
 sample_rate=8k
 min_or_max=min
+task=
 
-_nj=36
+_nj=8
 
 . utils/parse_options.sh
 
 sample_rate_int=${sample_rate%"k"}
 sample_rate_int=$((sample_rate_int * 1000))
 
-# first make the simulation metadata
-python local/prepare_simulation_metadata.py \
-    --wav_scp_folder ${anechoic_data_folder} \
-    --wham_folder ${wham_folder} -sr ${sample_rate_int} \
-    --wav_output_folder ${data_root}/wsj0_mix \
-    --simulation_config_path "${PWD}/local/simulation_config.json"
+mkdir -p ${data_root}/${task}_${min_or_max}_${sample_rate}
 
-# then do simulation
-for cond in tr cv tt; do
-    for spk in $(seq 5); do
-        python local/make_data.py \
-            --metadata_path "${data_root}/${cond}_${min_or_max}_${sample_rate}/simulation_metadata_${spk}spk.json" \
-            -nj ${_nj}
+python local/copy_simulation_metadata.py \
+    --source_folder ./local/simulation_metadata/${task}_min_8k \
+    --target_folder ${data_root}/${task}_${min_or_max}_${sample_rate} \
+    --source_words ./ /min/ /wav8k/ \
+    --target_words ${PWD}/ /${min_or_max}/ /wav${sample_rate}/
 
-        # mv ${data_root}/${cond}/spk${spk}.scp ${data_root}/${cond}/spk${spk}_backup.scp
-
-        # get noise SNR against the mixture and the actual RT60
-        python ${PWD}/local/get_snr_and_rt60.py \
-            --metadata_path "${data_root}/${cond}/simulation_metadata_${spk}spk.json" \
-            --decay_db 20
+for spk in $(seq 5); do
+    # make data directories
+    mkdir -p "${data_root}/wsj0_mix/${spk}speakers/wav${sample_rate}/${min_or_max}/${task}/mix"
+    mkdir -p "${data_root}/wsj0_mix/${spk}speakers/wav${sample_rate}/${min_or_max}/${task}/noise"
+    for s in $(seq ${spk}); do
+        mkdir -p "${data_root}/wsj0_mix/${spk}speakers/wav${sample_rate}/${min_or_max}/${task}/s${s}"
+        mkdir -p "${data_root}/wsj0_mix/${spk}speakers/wav${sample_rate}/${min_or_max}/${task}/reverb_s${s}"
+        mkdir -p "${data_root}/wsj0_mix/${spk}speakers/wav${sample_rate}/${min_or_max}/${task}/rir_s${s}"
     done
 
-    python ${PWD}/local/prepare_scp_files.py \
-            --simulation_metadata_dir "${data_root}/${cond}_${min_or_max}_${sample_rate}" \
-            --scp_output_dir "${data_root}/${cond}_${min_or_max}_${sample_rate}" \
-            --num_spk 5
-    ${PWD}/utt2spk_to_spk2utt.pl ${data_root}/${cond}_${min_or_max}_${sample_rate}/utt2spk > ${data_root}/${cond}_${min_or_max}_${sample_rate}/spk2utt
+    # simulate noisy reverberant mixtures
+    python local/simulation.py \
+        --metadata_path "${data_root}/${task}_${min_or_max}_${sample_rate}/simulation_metadata_${spk}spk.json" \
+        -nj ${_nj}
+
+    # get noise SNR against the mixture and the actual RT60
+    python ${PWD}/local/get_snr_and_rt60.py \
+        --metadata_path "${data_root}/${task}_${min_or_max}_${sample_rate}/simulation_metadata_${spk}spk.json" \
+        --decay_db 20
 done
-
-# useful for test, no need to use this
-# for cond in cv_min_8k; do
-#     for spk in $(seq 2 1 2); do
-#         python ${sciript_path} \
-#             --metadata_path "${data_root}/${cond}/simulation_metadata_${spk}spk.json" \
-#             -nj 1
-#     done
-# done
-
-# finally prepare the scp files
-# for cond in tr_min_8k cv_min_8k tt_min_8k; do
-#     python ${PWD}/local/prepare_scp_files.py \
-#             --simulation_metadata_dir "${data_root}/${cond}" \
-#             --scp_output_dir "${data_root}/${cond}" \
-#             --num_spk 5
-#     ${PWD}/utt2spk_to_spk2utt.pl ${data_root}/${cond}/utt2spk > ${data_root}/${cond}/spk2utt
-# done
-

@@ -21,10 +21,12 @@ EOF
 
 . ./db.sh
 
-wsj_full_wav=$PWD/data/wsj0/wsj0_wav
+wsj_full_wav=$PWD//data/wsj0
 wsj_mix_wav=$PWD/data/wsj0_mix
 wsj_mix_scripts=$PWD/data/wsj0_mix/scripts
 wsj_scp_output_dir=$PWD/data
+anechoic_mix_dir=/mnt/aoni04/saijo/universal_se/espnet_use/egs2/wsj0_Nmix/enh_tse1  # like ${PWD}/../enh_tse1
+wham_noise=
 
 
 other_text=data/local/other_text/text
@@ -32,8 +34,8 @@ nlsyms=data/nlsyms.txt
 min_or_max=min
 sample_rate=8k
 
-stage=0
-stop_stage=100
+stage=1
+stop_stage=1
 
 . utils/parse_options.sh
 
@@ -42,12 +44,19 @@ if [ $# -ne 0 ]; then
     exit 1;
 fi
 
-if [ ! -e "${WSJ0}" ]; then
-    log "Fill the value of 'WSJ0' of db.sh"
-    exit 1
+# if [ ! -e "${WSJ0}" ]; then
+#     log "Fill the value of 'WSJ0' of db.sh"
+#     exit 1
+# fi
+# if [ ! -e "${WSJ1}" ]; then
+#     log "Fill the value of 'WSJ1' of db.sh"
+#     exit 1
+# fi
+if [ -z "${anechoic_mix_dir}" ]; then
+    log "Please fill the path of anechoic_mix_dir"
 fi
-if [ ! -e "${WSJ1}" ]; then
-    log "Fill the value of 'WSJ1' of db.sh"
+if [ ! -e "${anechoic_mix_dir}" ]; then
+    log "Please make anechoic data first by running recipe in enh_tse1"
     exit 1
 fi
 
@@ -55,40 +64,54 @@ train_set="tr_"${min_or_max}_${sample_rate}
 train_dev="cv_"${min_or_max}_${sample_rate}
 recog_set="tt_"${min_or_max}_${sample_rate}
 
-
 if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
-    log "stage 0: Prepare simulation scripts and convert WSJ0 to wav"
-    echo "Downloading WSJ0_mixture scripts."
-    mkdir -p ${wsj_mix_scripts}
-    # mkdir -p ${wdir}/log
+    dir="./data"
+    mkdir -p ${dir}
+    log "stage 0: WHAM noise download and anechoic make 1-mix data"
+    if [ -z "$wham_noise" ]; then
+        if [ $(ls ${dir}/wham_noise 2>/dev/null | wc -l) -eq 4 ]; then
+            echo "'${dir}/wham_noise/' already exists. Skipping..."
+        else
+            # 17.65 GB unzipping to 35 GB
+            wham_noise_url=https://storage.googleapis.com/whisper-public/wham_noise.zip
+            wget --continue -O $dir/wham_noise.zip ${wham_noise_url}
+            unzip ${dir}/wham_noise.zip -d ${dir}
+        fi
+        wham_noise=${dir}/wham_noise
+    else
+        # make symbolic link
+        ln -s "$wham_noise" ${PWD}/data/
+    fi
 
-    git clone https://github.com/mpariente/pywsj0-mix.git ${wsj_mix_scripts}
-    cp local/generate_wsj_scp.py ${wsj_mix_scripts}
+    # make anechoic 1-mix
+    if [ ! -e "${anechoic_mix_dir}/data/wsj0_mix/1speakers" ]; then
+        sample_rate_int=$((${sample_rate%"k"} * 1000))
+        python local/generate_1mix.py \
+            --wsj0_metadata_folder ${anechoic_mix_dir}/data/wsj0_mix/scripts/metadata2 \
+            --wav_output_folder ${anechoic_mix_dir}/data/wsj0_mix/1speakers  \
+            -sr ${sample_rate_int}
+    else
+        log "${anechoic_mix_dir}/data/wsj0_mix/1speakers already exists. Skipping..."
+    fi
 
-    echo "WSJ0 wav file."
-    local/convert2wav.sh ${WSJ0} ${wsj_full_wav} || exit 1;
+    # make symbolic link to anechoic mixture
+    ln -s ${anechoic_mix_dir}/data/wsj0_mix ./data/anechoic_wsj0_mix
+    ln -s ${anechoic_mix_dir}/data/wsj0 ${wsj_full_wav}
 fi
 
 if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
     log "stage 1: Data simulation"
     ### This part is for WSJ0 mix
-    ### Download mixture scripts and create mixtures for 2 speakers
-    for nsrc in 2 3 4 5;
-    do
-        local/wsj0_create_mixture.sh ${wsj_mix_scripts} ${WSJ0} ${wsj_full_wav} \
-            ${wsj_mix_wav} ${nsrc} || exit 1;
-        local/wsj0_create_scp.sh ${wsj_mix_scripts} ${WSJ0} ${wsj_full_wav} \
-            ${wsj_mix_wav} ${nsrc} ${wsj_scp_output_dir} || exit 1;
+    # for task in tr cv tt; do
+    for task in cv tt; do
+        # simulation
+        local/simulation.sh \
+            --min-or-max ${min_or_max} --sample-rate ${sample_rate} --task ${task} || exit 1;
     done
-    local/wsj0_2mix_data_prep.sh --min-or-max ${min_or_max} --sample-rate ${sample_rate} \
-        ${wsj_mix_wav}/wav${sample_rate}/${min_or_max} ${wsj_mix_scripts} ${wsj_full_wav} || exit 1;
-
-    for task in tr cv tt;
-    do
-        python local/prepare_utt2category.py \
-        ${wsj_scp_output_dir}/${task}_${min_or_max}_${sample_rate}/wav.scp \
-        --output_dir ${wsj_scp_output_dir}/${task}_${min_or_max}_${sample_rate} || exit 1;
-    done
+    # other data prep
+    local/wsj0mix_data_prep.sh \
+        --min-or-max ${min_or_max} --sample-rate ${sample_rate} \
+        ${wsj_mix_wav}/wav${sample_rate}/${min_or_max} ${wsj_full_wav} || exit 1;
 fi
 
 if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
@@ -124,24 +147,23 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
 
     for task in tr cv tt;
     do
-        python local/prepare_spk2enroll_wsj.py \
-            ${wsj_mix_wav}/5speakers/wav_${sample_rate}/${min_or_max}/${task} \
-            --output_dir ${wsj_scp_output_dir}/${task}_${min_or_max}_${sample_rate} || exit 1;
-    done
+        # copy scp files from local while fixing some infomation
+        # e.g., min->max, 8k->16k and make them absolute paths
+        python local/copy_enroll_files.py \
+            --source_folder ./local/enroll_scp/${task}_min_8k \
+            --target_folder ${wsj_scp_output_dir}/${task}_${min_or_max}_${sample_rate} \
+            --source_words ./ /min/ /wav8k/ \
+            --target_words ${PWD}/ /${min_or_max}/ /wav${sample_rate}/
 
-    for task in tr cv tt;
-    do
+        # for training set, we prepare scp files here
         if [ "$task" = "tr" ]; then
-            train=true
-        else
-            train=false
+            python local/prepare_wsj_enroll.py \
+                ${wsj_scp_output_dir}/${task}_${min_or_max}_${sample_rate}/wav.scp \
+                ${wsj_scp_output_dir}/${task}_${min_or_max}_${sample_rate}/spk2enroll.json \
+                --num_spk 5 --train true \
+                --output_dir ${wsj_scp_output_dir}/${task}_${min_or_max}_${sample_rate} || exit 1;
         fi
 
-        python local/prepare_wsj_enroll.py \
-            ${wsj_scp_output_dir}/${task}_${min_or_max}_${sample_rate}/wav.scp \
-            ${wsj_scp_output_dir}/${task}_${min_or_max}_${sample_rate}/spk2enroll.json \
-            --num_spk 5 --train ${train} --seed 1 \
-            --output_dir ${wsj_scp_output_dir}/${task}_${min_or_max}_${sample_rate} || exit 1;
     done
 fi
 
