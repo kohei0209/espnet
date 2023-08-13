@@ -113,7 +113,9 @@ class MulAddAdaptLayer(nn.Module):
         for main0, enroll0 in zip(main, enroll):
             if self.do_addition:
                 enroll0_mul, enroll0_add = torch.chunk(enroll0, 2, dim=1)
-                out.append(enroll0_mul[:, :, None] * main0 + enroll0_add[:, :, None])
+                out.append(
+                    enroll0_mul[:, :, None] * main0 + enroll0_add[:, :, None]
+                )
             else:
                 out.append(enroll0[:, :, None] * main0)
         return into_orig_type(tuple(out), orig_type)
@@ -184,8 +186,8 @@ class AttentionAdaptLayer(nn.Module):
         is_tse = enroll is not None
 
         if not isinstance(main, tuple):
-            main = (main, )
-            enroll = (enroll, )
+            main = (main,)
+            enroll = (enroll,)
         for main0, enroll0 in zip(main, enroll):
             # non-dualpath case:
             #   main: (..., nspk, time, hidden)
@@ -196,36 +198,69 @@ class AttentionAdaptLayer(nn.Module):
             if is_tse:
                 assert type(main0) == type(enroll0)
                 if self.is_dualpath_process:
-                    batch, num_spk, chunk_size, num_chunks, hidden = main0.shape
+                    (
+                        batch,
+                        num_spk,
+                        chunk_size,
+                        num_chunks,
+                        hidden,
+                    ) = main0.shape
                     main0 = main0.permute(0, 2, 3, 1, 4)
                     mean_dim = (1, 2)
                 else:
                     batch, num_spk, time, hidden = main0.shape
                     main0 = main0.transpose(-2, -3)
-                    mean_dim = (1, )
+                    mean_dim = (1,)
                 s_v = self.mlp_v(main0)  # (..., time, nspk, hidden)
-                s_iv = self.mlp_iv(main0).mean(dim=mean_dim, keepdim=True)  # (..., 1, nspk, hidden)
+                s_iv = self.mlp_iv(main0).mean(
+                    dim=mean_dim, keepdim=True
+                )  # (..., 1, nspk, hidden)
                 s_aux = self.mlp_aux(enroll0).mean(dim=mean_dim, keepdim=True)
 
                 # e: [batch, chunk_size, num_chunk, n_enroll, nspk, hidden] / [batch, time, n_enroll, nspk, hidden]
                 # a: [batch, chunk_size, num_chunk, n_enroll, nspk, 1]
-                e_v = self.W_v(s_v)  # (batch, chunk_size, num_chunk, nspk, hidden)
+                e_v = self.W_v(
+                    s_v
+                )  # (batch, chunk_size, num_chunk, nspk, hidden)
                 e_iv = self.W_iv(s_iv)  # (..., nspk, hidden)
-                e_aux = self.W_aux(s_aux)  # (batch, 1, 1, hidden) / (batch, 1, hidden)
-                e = e_v[..., None, :, :] + e_iv[..., None, :, :] + e_aux[..., None, None, :, :] + self.b
+                e_aux = self.W_aux(
+                    s_aux
+                )  # (batch, 1, 1, hidden) / (batch, 1, hidden)
+                e = (
+                    e_v[..., None, :, :]
+                    + e_iv[..., None, :, :]
+                    + e_aux[..., None, None, :, :]
+                    + self.b
+                )
                 a = self.w(self.attention_activation(e))
                 a = self.softmax(a * self.alpha)
                 out = (a * main0[..., None, :, :]).sum(dim=-2)[..., 0, :]
             else:
                 if self.is_dualpath_process:
-                    batch, chunk_size, num_chunks, num_spk, hidden = main0.shape
-                    zeros = main0.new_zeros((batch, chunk_size, num_chunks, 1, 1, 1))
-                    ones = main0.new_ones((batch, chunk_size, num_chunks, 1, 1, 1))
+                    (
+                        batch,
+                        chunk_size,
+                        num_chunks,
+                        num_spk,
+                        hidden,
+                    ) = main0.shape
+                    zeros = main0.new_zeros(
+                        (batch, chunk_size, num_chunks, 1, 1, 1)
+                    )
+                    ones = main0.new_ones(
+                        (batch, chunk_size, num_chunks, 1, 1, 1)
+                    )
                 else:
                     batch, time, num_spk, hidden = main0.shape
                     zeros = main0.new_zeros((batch, time, 1, 1, 1))
                     ones = main0.new_ones((batch, time, 1, 1, 1))
-                a = torch.cat((torch.cat((ones, zeros), dim=-2), torch.cat((zeros, ones), dim=-2)), dim=-3)
+                a = torch.cat(
+                    (
+                        torch.cat((ones, zeros), dim=-2),
+                        torch.cat((zeros, ones), dim=-2),
+                    ),
+                    dim=-3,
+                )
                 out = (a * main0[..., None, :, :]).sum(dim=-2)
             outputs.append(out)
         if self.return_attn:
@@ -296,20 +331,26 @@ class TFAttentionAdaptLayer(nn.Module):
         orig_type = type(main)
 
         if not isinstance(main, tuple):
-            main = (main, )
-            enroll = (enroll, )
+            main = (main,)
+            enroll = (enroll,)
         for main0, enroll0 in zip(main, enroll):
             # main: (batch, nspk, hidden, freq, frame)
             # enroll: (batch, hidden, freq, frame)
             assert type(main0) == type(enroll0)
             batch, num_spk, hidden, freq, frame = main0.shape
-            main0 = main0.transpose(-1, -3)  # (batch, num_spk, frame, freq, hidden)
+            main0 = main0.transpose(
+                -1, -3
+            )  # (batch, num_spk, frame, freq, hidden)
             enroll0 = enroll0.transpose(-1, -3)  # (batch, frame, freq, hidden)
-            mean_dim = (-3, )
+            mean_dim = (-3,)
             # print("1", main0.shape, enroll0.shape, flush=True)
             s_v = self.mlp_v(main0)  # (batch, num_spk, frame, freq, hidden)
-            s_iv = self.mlp_iv(main0).mean(dim=mean_dim, keepdim=True)  # (batch, num_spk, 1, freq, hidden)
-            s_aux = self.mlp_aux(enroll0).mean(dim=mean_dim, keepdim=True)  # (batch, 1, freq, hidden)
+            s_iv = self.mlp_iv(main0).mean(
+                dim=mean_dim, keepdim=True
+            )  # (batch, num_spk, 1, freq, hidden)
+            s_aux = self.mlp_aux(enroll0).mean(
+                dim=mean_dim, keepdim=True
+            )  # (batch, 1, freq, hidden)
             # print("2", s_v.shape, s_iv.shape, s_aux.shape, flush=True)
 
             # e: (batch, num_spk, num_enroll, frame, freq, hidden)
@@ -318,7 +359,12 @@ class TFAttentionAdaptLayer(nn.Module):
             e_iv = self.W_iv(s_iv)  # (batch, num_spk, 1, freq, hidden)
             e_aux = self.W_aux(s_aux)  # (batch, 1, freq, hidden)
             # print("3", e_v.shape, e_iv.shape, e_aux.shape, flush=True)
-            a = e_v[:, :, None] + e_iv[:, :, None] + e_aux[:, :, None, None] + self.b
+            a = (
+                e_v[:, :, None]
+                + e_iv[:, :, None]
+                + e_aux[:, :, None, None]
+                + self.b
+            )
             a = self.w(self.attention_activation(a))
             a = self.softmax(a * self.alpha)
             out = (a * main0[..., None, :, :, :]).sum(dim=1)[:, 0]
@@ -365,15 +411,19 @@ class CrossAttentionAdaptLayer(nn.Module):
         self.cross_attention = nn.MultiheadAttention(
             attention_dim, num_heads=num_heads, batch_first=True
         )
-        from espnet2.enh.separator.tfgridnet_separator import LayerNormalization4D
+        from espnet2.enh.separator.tfgridnet_separator import (
+            LayerNormalization4D,
+        )
+
         self.norm_attn = LayerNormalization4D(attention_dim)
 
         # after cross attention
         self.feed_forward = nn.Sequential(
-            nn.Linear(attention_dim, ff_hidden_dim), nn.ReLU(), nn.Linear(ff_hidden_dim, indim),
+            nn.Linear(attention_dim, ff_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(ff_hidden_dim, indim),
         )
         self.norm_ff = LayerNormalization4D(indim)
-
 
     def forward(self, main, enroll=None):
         """CrossAttentionAdaptation Forward.
@@ -388,13 +438,13 @@ class CrossAttentionAdaptLayer(nn.Module):
                     tuple/list may be useful when we want to apply the adaptation
                       to both normal and skip connection at once
         """
-        
+
         outputs = []
         orig_type = type(main)
 
         if not isinstance(main, tuple):
-            main = (main, )
-            enroll = (enroll, )
+            main = (main,)
+            enroll = (enroll,)
         for main0, enroll0 in zip(main, enroll):
             # main: (batch, nspk, indim, freq, frame)
             # enroll: (batch, indim, freq, frame)
@@ -402,14 +452,26 @@ class CrossAttentionAdaptLayer(nn.Module):
 
             # process internal separation outputs
             batch, num_spk, indim, freq, frame = main0.shape
-            main0 = main0.permute(0, 3, 4, 1, 2) # (batch, freq, frame, num_spk, indim)
-            s_v = self.mlp(main0)  # (batch, freq, frame, num_spk, attention_dim)
-            s_v = s_v.reshape(-1, num_spk, self.attention_dim)  # (batch*freq*frame, num_spk, attention_dim)
+            main0 = main0.permute(
+                0, 3, 4, 1, 2
+            )  # (batch, freq, frame, num_spk, indim)
+            s_v = self.mlp(
+                main0
+            )  # (batch, freq, frame, num_spk, attention_dim)
+            s_v = s_v.reshape(
+                -1, num_spk, self.attention_dim
+            )  # (batch*freq*frame, num_spk, attention_dim)
 
             # process auxliary input for tse
-            enroll0 = enroll0.movedim(1, -1)  # (batch, freq, frame_aux, attention_dim)
-            s_aux = self.mlp_aux(enroll0).mean(dim=-2, keepdim=True)  # (batch, freq, 1, attention_dim)
-            s_aux = torch.tile(s_aux, (1, 1, frame, 1)).reshape(-1, 1, self.attention_dim)  # (batch*freq*frame, 1, attention_dim)
+            enroll0 = enroll0.movedim(
+                1, -1
+            )  # (batch, freq, frame_aux, attention_dim)
+            s_aux = self.mlp_aux(enroll0).mean(
+                dim=-2, keepdim=True
+            )  # (batch, freq, 1, attention_dim)
+            s_aux = torch.tile(s_aux, (1, 1, frame, 1)).reshape(
+                -1, 1, self.attention_dim
+            )  # (batch*freq*frame, 1, attention_dim)
 
             # cross attention
             out, attn_weight = self.cross_attention(s_aux, s_v, s_v)

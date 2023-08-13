@@ -6,12 +6,17 @@ import torch
 import torch.nn as nn
 
 from espnet2.enh.layers.dprnn import SingleRNN as SingleRNNLayer
-from espnet2.enh.layers.dptnet import ImprovedTransformerLayer as SingleTransformer
+from espnet2.enh.layers.dptnet import (
+    ImprovedTransformerLayer as SingleTransformer,
+)
 from espnet2.enh.layers.tcn import ChannelwiseLayerNorm
 from espnet2.enh.layers.tcn import choose_norm
 
 from espnet2.enh.layers.adapt_layers import make_adapt_layer
-from espnet2.enh.layers.dprnn_eda import SequenceAggregation, EncoderDecoderAttractor
+from espnet2.enh.layers.dprnn_eda import (
+    SequenceAggregation,
+    EncoderDecoderAttractor,
+)
 from espnet2.enh.layers.dptnet_eda import FiLM
 
 
@@ -54,9 +59,9 @@ class SingleRNN(SingleRNNLayer):
         # input = input.to(device)
         rnn_output, _ = self.rnn(input)
         rnn_output = self.dropout(rnn_output)
-        rnn_output = self.proj(rnn_output.reshape(-1, rnn_output.shape[2])).view(
-            input.shape
-        )
+        rnn_output = self.proj(
+            rnn_output.reshape(-1, rnn_output.shape[2])
+        ).view(input.shape)
         rnn_output = self.dropout(rnn_output) + rnn_output
         return self.norm(rnn_output.transpose(-1, -2)).transpose(-1, -2)
 
@@ -89,7 +94,9 @@ class TFPSNet_Base(nn.Module):
         # [B, input_size, T] -> [B, input_size, T]
         self.layer_norm = ChannelwiseLayerNorm(input_size)
         # [B, input_size, T] -> [B, bottleneck_size, T]
-        self.bottleneck_conv1x1 = nn.Conv1d(input_size, bottleneck_size, 1, bias=False)
+        self.bottleneck_conv1x1 = nn.Conv1d(
+            input_size, bottleneck_size, 1, bias=False
+        )
 
         self.input_size = input_size
         self.bottleneck_size = bottleneck_size
@@ -107,7 +114,9 @@ class TFPSNet_Base(nn.Module):
                     TFPSBlockType2(nn_module, *nn_args, **nn_kwargs)
                 )
             else:
-                raise ValueError(f"TFPSBlock type ({block}) must be either 1 or 2")
+                raise ValueError(
+                    f"TFPSBlock type ({block}) must be either 1 or 2"
+                )
 
         # output layer
         self.output = nn.Sequential(
@@ -117,7 +126,9 @@ class TFPSNet_Base(nn.Module):
     def forward(self, input):
         B, N, F, T = input.shape
         output = self.layer_norm(input.reshape(B, N, -1))
-        output = self.bottleneck_conv1x1(output).reshape(B, -1, F, T)  # B, BN, F, T
+        output = self.bottleneck_conv1x1(output).reshape(
+            B, -1, F, T
+        )  # B, BN, F, T
         for block in self.tfps_blocks:
             # print(f"output: {output.shape} -> ", end="")
             output = block(output)
@@ -214,7 +225,9 @@ class TFPSBlockType2(nn.Module):
     def time_frequency_path_process(self, x, apply_attn_mask=False):
         batch, N, freq, time = x.shape
         # batch * N, freq + time - 1, min(freq, time)
-        antidiag_pad = self.get_right_padded_antidiagonals(x.reshape(-1, freq, time))
+        antidiag_pad = self.get_right_padded_antidiagonals(
+            x.reshape(-1, freq, time)
+        )
         _, num_antidiag, len_antidiag = antidiag_pad.shape
         x = (
             antidiag_pad.reshape(batch, N, *antidiag_pad.shape[-2:])
@@ -253,7 +266,9 @@ class TFPSBlockType2(nn.Module):
 
         short_side = min(time, freq)
         pad = short_side - 1
-        input_pad_left = torch.nn.functional.pad(input[:, :short_side], (pad, 0))
+        input_pad_left = torch.nn.functional.pad(
+            input[:, :short_side], (pad, 0)
+        )
         input_pad_below = torch.nn.functional.pad(
             input[..., -short_side:], (0, 0, 0, pad)
         )
@@ -263,15 +278,21 @@ class TFPSBlockType2(nn.Module):
 
         stride = time + pad - 1
         above = input_pad_left.as_strided(
-            (bs, time - 1, short_side), (bs_stride_left, 1, stride), storage_offset=pad
+            (bs, time - 1, short_side),
+            (bs_stride_left, 1, stride),
+            storage_offset=pad,
         )
         below = input_pad_below.as_strided(
-            (bs, freq, short_side), (bs_stride_below, pad + 1, pad), storage_offset=pad
+            (bs, freq, short_side),
+            (bs_stride_below, pad + 1, pad),
+            storage_offset=pad,
         )
         antidiag_pad = torch.cat([above, below], dim=1)
         return antidiag_pad
 
-    def get_matrix_from_right_padded_antidiagonals(self, antidiag_pad, dim1, dim2):
+    def get_matrix_from_right_padded_antidiagonals(
+        self, antidiag_pad, dim1, dim2
+    ):
         assert antidiag_pad.size(1) == dim1 + dim2 - 1
         short_side = min(dim1, dim2)
         pad = short_side - 1
@@ -283,11 +304,17 @@ class TFPSBlockType2(nn.Module):
             bs_stride_above = above.size(1) * above.size(2)
             stride = pad + short_side + 1
             above_left_padded = above.as_strided(
-                (bs, pad, short_side), (bs_stride_above, stride, 1), storage_offset=0
+                (bs, pad, short_side),
+                (bs_stride_above, stride, 1),
+                storage_offset=0,
             )
-            recon = torch.cat([above_left_padded, antidiag_pad[:, pad:]], dim=1)
+            recon = torch.cat(
+                [above_left_padded, antidiag_pad[:, pad:]], dim=1
+            )
             recon = recon.as_strided(
-                (bs, dim1, dim2), (bs_stride, dim2, dim2 - 1), storage_offset=dim2 - 1
+                (bs, dim1, dim2),
+                (bs_stride, dim2, dim2 - 1),
+                storage_offset=dim2 - 1,
             )
         else:
             below = torch.nn.functional.pad(antidiag_pad[:, -pad:], (pad, 0))
@@ -298,7 +325,9 @@ class TFPSBlockType2(nn.Module):
                 (bs_stride_below, stride, 1),
                 storage_offset=pad - 1,
             )
-            recon = torch.cat([antidiag_pad[:, :-pad], below_left_padded], dim=1)
+            recon = torch.cat(
+                [antidiag_pad[:, :-pad], below_left_padded], dim=1
+            )
             recon = recon.as_strided(
                 (bs, dim1, dim2), (bs_stride, dim1 + 1, dim1), storage_offset=0
             )
@@ -341,7 +370,9 @@ class TFPSNet_Transformer(TFPSNet_Base):
     def forward(self, input):
         B, N, F, T = input.shape
         output = self.layer_norm(input.reshape(B, N, -1))
-        output = self.bottleneck_conv1x1(output).reshape(B, -1, F, T)  # B, BN, F, T
+        output = self.bottleneck_conv1x1(output).reshape(
+            B, -1, F, T
+        )  # B, BN, F, T
         for block in self.tfps_blocks:
             if isinstance(block, TFPSBlockType2):
                 output = block(output, apply_attn_mask=True)
@@ -414,19 +445,23 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
                     nn.Linear(bottleneck_size, bottleneck_size),
                     nn.Sigmoid(),
                 )
-                self.ff = self.gate_eda = nn.Sequential(
-                    nn.Linear(bottleneck_size, bottleneck_size),
-                    nn.PReLU(),
-                    nn.Linear(bottleneck_size, bottleneck_size),
-                )
+                # self.ff = self.gate_eda = nn.Sequential(
+                #     nn.Linear(bottleneck_size, bottleneck_size),
+                #     nn.PReLU(),
+                #     nn.Linear(bottleneck_size, bottleneck_size),
+                # )
 
         # tse related params
         self.i_adapt_layer = i_adapt_layer
         if i_adapt_layer is not None:
-            assert i_adapt_layer >= i_eda_layer, "Adapt layer must be placed after EDA"
+            assert (
+                i_adapt_layer >= i_eda_layer
+            ), "Adapt layer must be placed after EDA"
             # auxiliary network
             self.layer_norm_enroll = ChannelwiseLayerNorm(input_size)
-            self.bottleneck_conv1x1_enroll = nn.Conv1d(input_size, bottleneck_size, 1, bias=False)
+            self.bottleneck_conv1x1_enroll = nn.Conv1d(
+                input_size, bottleneck_size, 1, bias=False
+            )
             self.auxiliary_net = nn.ModuleList()
             for i in range(num_aux_tfps_blocks):
                 self.auxiliary_net.append(
@@ -444,7 +479,12 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
                 )
 
             # adapt layer
-            assert adapt_layer_type in ["tfattn", "tfattn_improved", "crossattn", "crossattn_improved"]
+            assert adapt_layer_type in [
+                "tfattn",
+                "tfattn_improved",
+                "crossattn",
+                "crossattn_improved",
+            ]
             self.adapt_enroll_dim = adapt_enroll_dim
             self.adapt_layer_type = adapt_layer_type
             # arguments
@@ -469,7 +509,7 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
                     adapt_hidden_dim,
                     bottleneck_size,
                     output_size,
-                    (1, 1, ),
+                    (1,),
                     SingleTransformer,
                     rnn_type,
                     bottleneck_size,
@@ -484,20 +524,28 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
             # load speaker selection module
             self.adapt_layer = make_adapt_layer(
                 adapt_layer_type,
-                indim=bottleneck_size, enrolldim=bottleneck_size,
-                ninputs=1, adapt_layer_kwargs=adapt_layer_params,
+                indim=bottleneck_size,
+                enrolldim=bottleneck_size,
+                ninputs=1,
+                adapt_layer_kwargs=adapt_layer_params,
             )
 
     def forward(self, input, enroll_emb, num_spk=None):
         is_tse = enroll_emb is not None
         B, N, F, T = input.shape
         output = self.layer_norm(input.reshape(B, N, -1))
-        output = self.bottleneck_conv1x1(output).reshape(B, -1, F, T)  # B, H, F, T
+        output = self.bottleneck_conv1x1(output).reshape(
+            B, -1, F, T
+        )  # B, H, F, T
         for i, block in enumerate(self.tfps_blocks):
             if isinstance(block, TFPSBlockType2):
                 output = block(output, apply_attn_mask=True)
             else:
-                if not block.training and self.memory_efficient_inference:
+                if (
+                    not block.training
+                    and self.memory_efficient_inference
+                    and i > self.i_eda_layer
+                ):
                     torch.cuda.empty_cache()
                     for o in range(output.shape[0]):
                         output[o] = block(output[[o]])[0]
@@ -506,7 +554,9 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
 
             # EDA part (internal separation)
             if i == self.i_eda_layer:
-                output, probabilities = self.eda_internal_separation(output, num_spk=num_spk)
+                output, probabilities = self.eda_internal_separation(
+                    output, num_spk=num_spk
+                )
 
             # target speaker extraction part
             if i == self.i_adapt_layer and is_tse:
@@ -521,21 +571,33 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
     def eda_internal_separation(self, input, num_spk):
         B, H, F, T = input.shape
         # aggregate frequency dimension, (B, H, F, T)
-        aggregated_sequence = self.sequence_aggregation(input.transpose(-1, -3))
+        aggregated_sequence = self.sequence_aggregation(
+            input.transpose(-1, -3)
+        )
 
         # estimate attractors and its corresponding existance probabilities
-        attractors, probabilities = self.eda(aggregated_sequence, num_spk=num_spk)
+        attractors, probabilities = self.eda(
+            aggregated_sequence, num_spk=num_spk
+        )
 
         # disentangling (part of internal separation) using estimated attractors
-        output = torch.unsqueeze(input, dim=1)  # (B, H, F, T) -> (B, 1, H, F, T)
-        attractors = attractors[..., :-1, :, None, None]  # (B, N+1, H) -> (B, N, H, 1, 1)
+        output = torch.unsqueeze(
+            input, dim=1
+        )  # (B, H, F, T) -> (B, 1, H, F, T)
+        attractors = attractors[
+            ..., :-1, :, None, None
+        ]  # (B, N+1, H) -> (B, N, H, 1, 1)
         if self.sep_algo == "multiply":
-            output = output * attractors  # outout: (B, 1, H, F, T) -> (B, N, H, F, T)
+            output = (
+                output * attractors
+            )  # outout: (B, 1, H, F, T) -> (B, N, H, F, T)
         elif self.sep_algo == "gating":
             gate = output * attractors
             gate = self.gate(gate.transpose(-1, -3)).transpose(-1, -3)
-            output = self.ff(output.transpose(-1, -3)).transpose(-1, -3)
-            output = output * gate  # outout: (B, 1, H, F, T) -> (B, N, H, F, T)
+            # output = self.ff(output.transpose(-1, -3)).transpose(-1, -3)
+            output = (
+                output * gate
+            )  # outout: (B, 1, H, F, T) -> (B, N, H, F, T)
 
         # each separated features are processed independently by integrating into batch dim
         output = output.view(-1, H, F, T)
@@ -544,21 +606,25 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
     def tse_module(self, input, enroll_emb):
         # get shapes
         B, N, F, T_enroll = enroll_emb.shape
-        H, T = output.shape[-3], output.shape[-1]
+        H, T = input.shape[-3], input.shape[-1]
 
         # process enroll embedding
         enroll_emb = self.layer_norm_enroll(enroll_emb.reshape(B, N, -1))
-        enroll_emb = self.bottleneck_conv1x1_enroll(enroll_emb).reshape(B, H, F, T_enroll)
+        enroll_emb = self.bottleneck_conv1x1_enroll(enroll_emb).reshape(
+            B, H, F, T_enroll
+        )
         for aux_block in self.auxiliary_net:
             enroll_emb = aux_block(enroll_emb)
 
         # extract only the target speaker
-        output = output.view(B, -1, H, F, T)
+        output = input.view(B, -1, H, F, T)
         output = self.adapt_layer(output, enroll_emb)
 
         # additional enhancement layers
         if "improved" in self.adapt_layer_type:
-            output = self.conditional_model(output, enroll_emb.mean(dim=(-1, -2), keepdim=True))
+            output = self.conditional_model(
+                output, enroll_emb.mean(dim=-1, keepdim=True)
+            )
         return output
 
 
@@ -591,7 +657,9 @@ class Conditional_TFPSNet_Transformer(nn.Module):
                     TFPSBlockType2(nn_module, *nn_args, **nn_kwargs)
                 )
             else:
-                raise ValueError(f"TFPSBlock type ({block}) must be either 1 or 2")
+                raise ValueError(
+                    f"TFPSBlock type ({block}) must be either 1 or 2"
+                )
             self.film.append(
                 FiLM(
                     bottleneck_size,
@@ -605,7 +673,9 @@ class Conditional_TFPSNet_Transformer(nn.Module):
         B, BN, F, T = input.shape
         output = input
         for i, block in enumerate(self.tfps_blocks):
-            output = self.film[i](output.transpose(-1, -3), enroll_emb.transpose(-1, -3)).transpose(-1, -3)
+            output = self.film[i](
+                output.transpose(-1, -3), enroll_emb.transpose(-1, -3)
+            ).transpose(-1, -3)
             if isinstance(block, TFPSBlockType2):
                 output = block(output, apply_attn_mask=True)
             else:

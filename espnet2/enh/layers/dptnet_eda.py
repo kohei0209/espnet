@@ -14,7 +14,10 @@ from espnet.nets.pytorch_backend.nets_utils import get_activation
 from espnet2.enh.layers.dptnet import ImprovedTransformerLayer
 
 from espnet2.enh.layers.adapt_layers import make_adapt_layer
-from espnet2.enh.layers.dprnn_eda import SequenceAggregation, EncoderDecoderAttractor
+from espnet2.enh.layers.dprnn_eda import (
+    SequenceAggregation,
+    EncoderDecoderAttractor,
+)
 
 
 class DPTNet_EDA_Informed(nn.Module):
@@ -110,12 +113,16 @@ class DPTNet_EDA_Informed(nn.Module):
                 )
 
         # output layer
-        self.output = nn.Sequential(nn.PReLU(), nn.Conv2d(input_size, output_size, 1))
+        self.output = nn.Sequential(
+            nn.PReLU(), nn.Conv2d(input_size, output_size, 1)
+        )
 
         # eda related params
         self.i_eda_layer = i_eda_layer
         self.num_eda_modules = num_eda_modules
-        assert self.num_eda_modules % 2 == 1, "number of EDA modules should be odd number"
+        assert (
+            self.num_eda_modules % 2 == 1
+        ), "number of EDA modules should be odd number"
         # if i_eda_layer is not None:
         #     self.sequence_aggregation = nn.ModuleList([])
         #     self.eda = nn.ModuleList([])
@@ -182,26 +189,39 @@ class DPTNet_EDA_Informed(nn.Module):
 
             # compute attractor
             if i == self.i_eda_layer:
-                aggregated_sequence = self.sequence_aggregation(output.transpose(-1, -3))
-                attractors, probabilities = self.eda(aggregated_sequence, num_spk=num_spk)
-                output = output[..., None, :, :, :] * attractors[..., :-1, :, None, None]  # [B, J, N, L, K]
+                aggregated_sequence = self.sequence_aggregation(
+                    output.transpose(-1, -3)
+                )
+                attractors, probabilities = self.eda(
+                    aggregated_sequence, num_spk=num_spk
+                )
+                output = (
+                    output[..., None, :, :, :]
+                    * attractors[..., :-1, :, None, None]
+                )  # [B, J, N, L, K]
                 # output, probabilities = self.eda_process(output, num_spk)
                 output = output.view(-1, hidden_dim, dim1, dim2)
                 batch = output.shape[0]
 
             # triple-path block
             if self.triple_path and i > self.i_eda_layer:
-                output = self.channel_chunk_process(output, i - self.i_eda_layer - 1, org_batch)
+                output = self.channel_chunk_process(
+                    output, i - self.i_eda_layer - 1, org_batch
+                )
 
             # target speaker extraction part
             if i == self.i_adapt_layer and is_tse:
                 # # assert num_spk > 1 or num_spk is not None, f"num_spk = {num_spk}"
                 enroll_emb = enroll_emb.permute(0, 2, 3, 1)
-                output = output.view(org_batch, -1, hidden_dim, dim1, dim2).permute(0, 1, 3, 4, 2)
+                output = output.view(
+                    org_batch, -1, hidden_dim, dim1, dim2
+                ).permute(0, 1, 3, 4, 2)
                 output = self.adapt_layer(output, enroll_emb)
                 output = output.permute(0, 3, 1, 2)
                 if self.adapt_layer_type == "attn_improved":
-                    output = self.conditioning_model(output, enroll_emb.mean(dim=(1, 2), keepdim=True))
+                    output = self.conditioning_model(
+                        output, enroll_emb.mean(dim=(1, 2), keepdim=True)
+                    )
 
         if self.i_eda_layer is None:
             probabilities = None
@@ -210,14 +230,22 @@ class DPTNet_EDA_Informed(nn.Module):
 
     def intra_chunk_process(self, x, layer_index):
         batch, N, chunk_size, n_chunks = x.size()
-        x = x.transpose(1, -1).contiguous().view(batch * n_chunks, chunk_size, N)
+        x = (
+            x.transpose(1, -1)
+            .contiguous()
+            .view(batch * n_chunks, chunk_size, N)
+        )
         x = self.row_transformer[layer_index](x)
         x = x.reshape(batch, n_chunks, chunk_size, N).permute(0, 3, 2, 1)
         return x
 
     def inter_chunk_process(self, x, layer_index):
         batch, N, chunk_size, n_chunks = x.size()
-        x = x.permute(0, 2, 3, 1).contiguous().view(batch * chunk_size, n_chunks, N)
+        x = (
+            x.permute(0, 2, 3, 1)
+            .contiguous()
+            .view(batch * chunk_size, n_chunks, N)
+        )
         x = self.col_transformer[layer_index](x)
         x = x.view(batch, chunk_size, n_chunks, N).permute(0, 3, 1, 2)
         return x
@@ -225,9 +253,17 @@ class DPTNet_EDA_Informed(nn.Module):
     def channel_chunk_process(self, x, layer_index, org_batch_size):
         batch, N, chunk_size, n_chunks = x.size()
         x = x.view(org_batch_size, -1, N, chunk_size, n_chunks)
-        x = x.permute(0, 3, 4, 1, 2).contiguous().view(batch * chunk_size * n_chunks, -1, N)
+        x = (
+            x.permute(0, 3, 4, 1, 2)
+            .contiguous()
+            .view(batch * chunk_size * n_chunks, -1, N)
+        )
         x = self.chan_transformer[layer_index](x)
-        x = x.view(batch, chunk_size, n_chunks, -1, N).permute(0, 3, 4, 1, 2).contiguous()
+        x = (
+            x.view(batch, chunk_size, n_chunks, -1, N)
+            .permute(0, 3, 4, 1, 2)
+            .contiguous()
+        )
         x = x.view(batch, N, chunk_size, n_chunks)
         return x
 
@@ -236,20 +272,31 @@ class DPTNet_EDA_Informed(nn.Module):
         attractors = []
         probabilities = []
         for i in range(self.num_eda_modules):
-            aggregated_sequence = self.sequence_aggregation[i](x.transpose(-1, -3))
-            attractor, probability = self.eda[i](aggregated_sequence, num_spk=num_spk)
+            aggregated_sequence = self.sequence_aggregation[i](
+                x.transpose(-1, -3)
+            )
+            attractor, probability = self.eda[i](
+                aggregated_sequence, num_spk=num_spk
+            )
             attractors.append(attractor)
             probabilities.append(probability)
-            num_attractors.append(attractor.shape[-2])  # estimated number of speakers
+            num_attractors.append(
+                attractor.shape[-2]
+            )  # estimated number of speakers
         # we use mode value as the estimated number of speakers
-        output, count = 0., 0
+        output, count = 0.0, 0
         est_num_spk = statistics.mode(num_attractors)
         for i in range(self.num_eda_modules):
             if num_attractors[i] == est_num_spk:
-                output = output + (x[..., None, :, :, :] * attractors[i][..., :-1, :, None, None])  # [B, J, N, L, K]
+                output = output + (
+                    x[..., None, :, :, :]
+                    * attractors[i][..., :-1, :, None, None]
+                )  # [B, J, N, L, K]
                 count += 1
         output = output / count
-        probabilities = torch.cat(probabilities, dim=0)  # concat along batch dim
+        probabilities = torch.cat(
+            probabilities, dim=0
+        )  # concat along batch dim
         return output, probabilities
 
 
@@ -342,7 +389,9 @@ class ConditionalDPTNet(nn.Module):
         # input = input.to(device)
         output = input
         for i in range(len(self.row_transformer)):
-            output = self.film[i](output.transpose(-1, -3), enroll_emb).transpose(-1, -3)
+            output = self.film[i](
+                output.transpose(-1, -3), enroll_emb
+            ).transpose(-1, -3)
             output = self.intra_chunk_process(output, i)
             output = self.inter_chunk_process(output, i)
 
