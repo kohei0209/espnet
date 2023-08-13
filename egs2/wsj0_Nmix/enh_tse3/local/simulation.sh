@@ -21,7 +21,7 @@ sample_rate=8k
 min_or_max=min
 task=
 
-_nj=8
+_nj=32
 
 . utils/parse_options.sh
 
