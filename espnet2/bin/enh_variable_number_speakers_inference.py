@@ -18,7 +18,9 @@ from espnet2.enh.loss.criterions.time_domain import SISNRLoss
 from espnet2.enh.loss.wrappers.pit_solver import PITSolver
 from espnet2.fileio.sound_scp import SoundScpWriter
 from espnet2.fileio.datadir_writer import DatadirWriter
-from espnet2.tasks.enh_tse_ss import TargetSpeakerExtractionAndEnhancementTask as TSESSTask
+from espnet2.tasks.enh_tse_ss import (
+    TargetSpeakerExtractionAndEnhancementTask as TSESSTask,
+)
 from espnet2.torch_utils.device_funcs import to_device
 from espnet2.torch_utils.set_all_random_seed import set_all_random_seed
 from espnet2.train.abs_espnet_model import AbsESPnetModel
@@ -103,7 +105,7 @@ def compensate_under_estimation(ref, inf, perm):
     return inf
 
 
-def select_sources(ref, inf, mix, writer, max_num_spk, sample_rate, key):
+def select_sources(ref, inf, mix, writer, max_num_spk, key):
     true_num_spk = len(ref)
     ref = torch.cat(ref, dim=0)
     est_num_spk = len(inf)
@@ -123,7 +125,9 @@ def select_sources(ref, inf, mix, writer, max_num_spk, sample_rate, key):
         )
     # b. logging when over-estimation happens (discard sources in c.)
     elif est_num_spk > true_num_spk:
-        logging.info(f"Over-separation (Est: {est_num_spk}, Ref: {true_num_spk}). Discard over-separated sources")
+        logging.info(
+            f"Over-separation (Est: {est_num_spk}, Ref: {true_num_spk}). Discard over-separated sources"
+        )
     # c. solve permutation and discard over-estimated source
     sdr, perm = fast_bss_eval.sdr(ref, inf, return_perm=True)
 
@@ -139,7 +143,9 @@ def select_sources(ref, inf, mix, writer, max_num_spk, sample_rate, key):
     assert ref.shape == inf.shape, f"{ref.shape}, {inf.shape}"
     writer["Est_num_spk"][key] = str(est_num_spk)
 
-    assert inf.ndim == 2, "shape should be (n_spk, n_samples) and there must not be the batch dimension"
+    assert (
+        inf.ndim == 2
+    ), "shape should be (n_spk, n_samples) and there must not be the batch dimension"
     inf = [w[None].cpu().numpy() for w in inf]
     return inf
 
@@ -178,10 +184,14 @@ class SeparateSpeech:
             (
                 enh_model,
                 enh_train_args,
-            ) = TSESSTask.build_model_from_file(train_config, model_file, device)
+            ) = TSESSTask.build_model_from_file(
+                train_config, model_file, device
+            )
         else:
             # Overwrite model attributes
-            train_config = get_train_config(train_config, model_file=model_file)
+            train_config = get_train_config(
+                train_config, model_file=model_file
+            )
             with train_config.open("r", encoding="utf-8") as f:
                 train_args = yaml.safe_load(f)
 
@@ -189,7 +199,12 @@ class SeparateSpeech:
                 infer_args = yaml.safe_load(f)
 
             supported_keys = list(
-                chain(*[[k, k + "_conf"] for k in ("encoder", "extractor", "decoder")])
+                chain(
+                    *[
+                        [k, k + "_conf"]
+                        for k in ("encoder", "extractor", "decoder")
+                    ]
+                )
             )
             for k in infer_args.keys():
                 if k not in supported_keys:
@@ -222,7 +237,9 @@ class SeparateSpeech:
         # reference channel for processing multi-channel speech
         if ref_channel is not None:
             logging.info(
-                "Overwrite enh_model.separator.ref_channel with {}".format(ref_channel)
+                "Overwrite enh_model.separator.ref_channel with {}".format(
+                    ref_channel
+                )
             )
             enh_model.separator.ref_channel = ref_channel
             if hasattr(enh_model.separator, "beamformer"):
@@ -233,7 +250,9 @@ class SeparateSpeech:
 
         self.segmenting = segment_size is not None and hop_size is not None
 
-        self.use_true_nspk = use_true_nspk  # if true, number of speakers are informed to model
+        self.use_true_nspk = (
+            use_true_nspk  # if true, number of speakers are informed to model
+        )
 
     @torch.no_grad()
     def __call__(
@@ -270,6 +289,7 @@ class SeparateSpeech:
         lengths = to_device(lengths, device=self.device)
 
         from espnet2.enh.espnet_model_tse_ss import normalization
+
         speech_mix, mean, std = normalization(speech_mix)
 
         # b. Separation
@@ -278,13 +298,14 @@ class SeparateSpeech:
         else:
             num_spk = None
         feats, f_lens = self.enh_model.encoder(speech_mix, lengths)
-        feats, _, others = self.enh_model.extractor(feats, f_lens, num_spk=num_spk)
+        feats, _, others = self.enh_model.extractor(
+            feats, f_lens, num_spk=num_spk
+        )
         waves = [self.enh_model.decoder(f, lengths)[0] for f in feats]
 
         if self.normalize_output_wav:
             waves = [
-                (w / abs(w).max(dim=1, keepdim=True)[0] * 0.9)
-                for w in waves
+                (w / abs(w).max(dim=1, keepdim=True)[0] * 0.9) for w in waves
             ]  # list[(batch, sample)]
         else:
             # waves = [w.cpu().numpy() for w in waves]
@@ -304,7 +325,9 @@ class SeparateSpeech:
             perm (torch.Tensor): permutation for enh_wavs (Batch, num_spk)
         """
 
-        criterion_class = {"si_snr": SISNRLoss, "mse": FrequencyDomainMSE}[criterion]
+        criterion_class = {"si_snr": SISNRLoss, "mse": FrequencyDomainMSE}[
+            criterion
+        ]
 
         pit_solver = PITSolver(criterion=criterion_class())
 
@@ -443,10 +466,13 @@ def inference(
     writers = []
     for i in range(max_num_spk):
         writers.append(
-            SoundScpWriter(f"{output_dir}/wavs/{i + 1}", f"{output_dir}/spk{i + 1}.scp")
+            SoundScpWriter(
+                f"{output_dir}/wavs/{i + 1}", f"{output_dir}/spk{i + 1}.scp"
+            )
         )
 
     import tqdm
+
     with DatadirWriter(score_output_dir) as score_writer:
         for i, (keys, batch) in tqdm.tqdm(enumerate(loader)):
             # skip samples when evaluating only N-mix
@@ -457,7 +483,9 @@ def inference(
             assert all(isinstance(s, str) for s in keys), keys
             _bs = len(next(iter(batch.values())))
             assert len(keys) == _bs, f"{len(keys)} != {_bs}"
-            ref = {k: v for k, v in batch.items() if re.match(r"speech_ref\d+", k)}
+            ref = {
+                k: v for k, v in batch.items() if re.match(r"speech_ref\d+", k)
+            }
             batch = {k: v for k, v in batch.items() if k == "speech_mix"}
 
             # remove dummy reference
@@ -474,7 +502,15 @@ def inference(
 
             # separation
             waves = separate_speech(**batch, fs=fs, num_spk=num_spk)
-            waves = select_sources(ref, waves, batch["speech_mix"], score_writer, max_num_spk, fs, keys[0])
+            waves = select_sources(
+                ref,
+                waves,
+                batch["speech_mix"],
+                score_writer,
+                max_num_spk,
+                fs,
+                keys[0],
+            )
 
             # save audios and handle dummy samples
             for spk in range(max_num_spk):
@@ -537,7 +573,9 @@ def get_parser():
         action="append",
     )
     group.add_argument("--key_file", type=str_or_none)
-    group.add_argument("--allow_variable_data_keys", type=str2bool, default=False)
+    group.add_argument(
+        "--allow_variable_data_keys", type=str2bool, default=False
+    )
 
     group = parser.add_argument_group("Output data related")
     group.add_argument(
