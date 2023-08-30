@@ -1,0 +1,1 @@
+python3 -m pip install pyroomacoustics==0.7.3
