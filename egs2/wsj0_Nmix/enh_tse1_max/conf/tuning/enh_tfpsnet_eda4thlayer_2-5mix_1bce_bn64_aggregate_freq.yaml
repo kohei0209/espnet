@@ -64,6 +64,7 @@ extractor_conf:
   num_spk: 1
   enc_channels: 256
   bottleneck_size: 64
+  masking: true
   separator_type: transformer
   tfps_blocks: [1, 1, 1, 1, 1, 1]
   rnn_type: lstm
@@ -93,7 +94,7 @@ criterions:
 use_amp: false
 use_wandb: true
 wandb_project: use_preliminary_wsj
-wandb_name: Max_NoisyRev_TFPSNetAggregateF_Sep_EDA4thLayer_2-5mix_SISNRLoss+1BCELoss_ReduceLR_lr2e-4
+wandb_name: Max_TFPSNetAggrregateF_Sep_EDA4thLayer_2-5mix_SISNRLoss+1BCELoss_ReduceLR_lr2e-4
 
 init_param:
-  - ../enh_tse3/exp/enh_enh_tfpsnet_eda4thlayer_1-5mix_1bce_bn64_aggregate_freq_raw/ave_epochs_50_49_48_47_44.pth
+  - ../enh_tse1/exp/enh_enh_tfpsnet_eda4thlayer_2-5mix_1bce_bn64_aggregate_freq_raw/ave_epochs_50_49_48_47_46.pth
