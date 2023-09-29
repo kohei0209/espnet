@@ -9,12 +9,16 @@ from typeguard import check_argument_types, check_return_type
 
 from espnet2.enh.espnet_model_tse_ss import ESPnetExtractionEnhancementModel
 from espnet2.enh.extractor.abs_extractor import AbsExtractor
-from espnet2.enh.extractor.td_speakerbeam_extractor import TDSpeakerBeamExtractor
-from espnet2.enh.extractor.td_speakerbeam_hybrid_extractor import TDSpeakerBeamExtractorWithAttention
+from espnet2.enh.extractor.td_speakerbeam_extractor import (
+    TDSpeakerBeamExtractor,
+)
+from espnet2.enh.extractor.td_speakerbeam_hybrid_extractor import (
+    TDSpeakerBeamExtractorWithAttention,
+)
 from espnet2.enh.extractor.td_dprnn_eda_extractor import DPRNNEDAExtractor
 from espnet2.enh.extractor.sepformer_extractor import SepformerEDAExtractor
 from espnet2.enh.extractor.dptnet_eda_extractor import DPTNetEDAExtractor
-from espnet2.enh.extractor.tfpsnet_eda_extractor import TFPSNetEDAExtractor
+from espnet2.enh.extractor.tfpsnet_eda_extractor import TFPSNetEDAExtractor, MultiDecoderTFPSNetExtractor
 from espnet2.enh.extractor.asenet import ASENet
 from espnet2.tasks.abs_task import AbsTask
 from espnet2.tasks.enh import (
@@ -26,27 +30,26 @@ from espnet2.tasks.enh import (
 from espnet2.torch_utils.initialize import initialize
 from espnet2.train.class_choices import ClassChoices
 from espnet2.train.collate_fn import CommonCollateFn
-from espnet2.train.preprocessor import AbsPreprocessor, TSEPreprocessor, EnhTsePreprocessor
+from espnet2.train.preprocessor import (
+    AbsPreprocessor,
+    TSEPreprocessor,
+    EnhTsePreprocessor,
+)
 from espnet2.train.trainer import Trainer
 from espnet2.utils.get_default_kwargs import get_default_kwargs
 from espnet2.utils.nested_dict_action import NestedDictAction
 from espnet2.utils.types import int_or_none, str2bool, str_or_none
+
 # added
 from espnet2.train.distributed_utils import (
     DistributedOption,
-    free_port,
-    get_master_port,
-    get_node_rank,
-    get_num_nodes,
-    resolve_distributed_mode,
 )
 from espnet2.samplers.unsorted_batch_sampler import UnsortedBatchSampler
 from espnet2.tasks.abs_task import IteratorOptions
 from espnet2.iterators.abs_iter_factory import AbsIterFactory
 from espnet2.iterators.chunk_iter_factory import ChunkIterFactory
-from espnet2.iterators.multiple_iter_factory import MultipleIterFactory
 from espnet2.iterators.sequence_iter_factory import SequenceIterFactory
-from espnet2.train.dataset import DATA_TYPES, AbsDataset, ESPnetDataset
+from espnet2.train.dataset import ESPnetDataset
 from espnet2.tasks.abs_task import build_batch_sampler
 
 extractor_choices = ClassChoices(
@@ -59,6 +62,7 @@ extractor_choices = ClassChoices(
         sepformer_eda=SepformerEDAExtractor,
         dptnet_eda=DPTNetEDAExtractor,
         tfpsnet_eda=TFPSNetEDAExtractor,
+        tfpsnet_multidecoder=MultiDecoderTFPSNetExtractor,
     ),
     type_check=AbsExtractor,
     default="td_speakerbeam",
@@ -256,6 +260,18 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             default="enh",
             help="Used for preprocessor.",
         )
+        group.add_argument(
+            "--remove_samples_with_speaker_overlap",
+            type=str2bool,
+            default=False,
+            help="Whether to remove data with speaker overlap (for WSJ0_Nmix)",
+        )
+        group.add_argument(
+            "--batch_size_nmix",
+            type=list,
+            default=None,
+            help="Batch size for n_mix (for WSJ0_Nmix)",
+        )
 
         for class_choices in cls.class_choices_list:
             # Append --<name> and --<name>_conf.
@@ -272,7 +288,9 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
         if mode == "train":
             preprocess_fn = cls.build_preprocess_fn(args, train=True)
             collate_fn = cls.build_collate_fn(args, train=True)
-            data_path_and_name_and_type = args.train_data_path_and_name_and_type
+            data_path_and_name_and_type = (
+                args.train_data_path_and_name_and_type
+            )
             shape_files = args.train_shape_file
             batch_size = args.batch_size
             batch_bins = args.batch_bins
@@ -287,7 +305,9 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
         elif mode == "valid":
             preprocess_fn = cls.build_preprocess_fn(args, train=False)
             collate_fn = cls.build_collate_fn(args, train=False)
-            data_path_and_name_and_type = args.valid_data_path_and_name_and_type
+            data_path_and_name_and_type = (
+                args.valid_data_path_and_name_and_type
+            )
             shape_files = args.valid_shape_file
 
             if args.valid_batch_type is None:
@@ -311,13 +331,15 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             distributed = distributed_option.distributed
             num_batches = None
             # num_iters_per_epoch = None
-            num_iters_per_epoch=args.num_iters_valid  # added
+            num_iters_per_epoch = args.num_iters_valid  # added
             train = False
 
         elif mode == "plot_att":
             preprocess_fn = cls.build_preprocess_fn(args, train=False)
             collate_fn = cls.build_collate_fn(args, train=False)
-            data_path_and_name_and_type = args.valid_data_path_and_name_and_type
+            data_path_and_name_and_type = (
+                args.valid_data_path_and_name_and_type
+            )
             shape_files = args.valid_shape_file
             batch_type = "unsorted"
             batch_size = 1
@@ -349,7 +371,6 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             train=train,
         )
 
-
     @classmethod
     def build_chunk_iter_factory(
         cls,
@@ -376,7 +397,8 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             key_file = iter_options.shape_files[0]
 
         batch_sampler = UnsortedBatchSampler(
-            batch_size=1, key_file=key_file,
+            batch_size=1,
+            key_file=key_file,
             # utt2category_file=utt2category_file,
         )
         batches = list(batch_sampler)
@@ -393,7 +415,9 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
                     new_batches.append(batch)
             batches = new_batches
             num_batches_after = len(batches)
-            logging.info(f"Original batches: {num_batches_before}, Current batches: {num_batches_after}")
+            logging.info(
+                f"Original batches: {num_batches_before}, Current batches: {num_batches_after}"
+            )
         if iter_options.num_batches is not None:
             batches = batches[: iter_options.num_batches]
         logging.info(f"[{mode}] dataset:\n{dataset}")
@@ -402,9 +426,13 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             world_size = torch.distributed.get_world_size()
             rank = torch.distributed.get_rank()
             if len(batches) < world_size:
-                raise RuntimeError("Number of samples is smaller than world_size")
+                raise RuntimeError(
+                    "Number of samples is smaller than world_size"
+                )
             if iter_options.batch_size < world_size:
-                raise RuntimeError("batch_size must be equal or more than world_size")
+                raise RuntimeError(
+                    "batch_size must be equal or more than world_size"
+                )
 
             if rank < iter_options.batch_size % world_size:
                 batch_size = iter_options.batch_size // world_size + 1
@@ -458,11 +486,14 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
         )
 
         if Path(
-            Path(iter_options.data_path_and_name_and_type[0][0]).parent, "utt2category"
+            Path(iter_options.data_path_and_name_and_type[0][0]).parent,
+            "utt2category",
         ).exists():
             utt2category_file = str(
                 Path(
-                    Path(iter_options.data_path_and_name_and_type[0][0]).parent,
+                    Path(
+                        iter_options.data_path_and_name_and_type[0][0]
+                    ).parent,
                     "utt2category",
                 )
             )
@@ -484,6 +515,7 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             if iter_options.distributed
             else 1,
             utt2category_file=utt2category_file,
+            remove_samples_with_speaker_overlap=args.remove_samples_with_speaker_overlap,
         )
 
         batches = list(batch_sampler)
@@ -500,8 +532,30 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
                     new_batches.append(batch)
             batches = new_batches
             num_batches_after = len(batches)
-            logging.info(f"Original batches: {num_batches_before}, Current batches: {num_batches_after}")
+            logging.info(
+                f"Original batches: {num_batches_before}, Current batches: {num_batches_after}"
+            )
 
+        # variable batch size
+        if args.batch_size_nmix is not None and mode != "plot_att":
+            # batch_sizes = [4, 3, 2, 2, 1]
+            new_batches = []
+            b = 0
+            while True:
+                batch_size = args.batch_size_nmix[int(batches[b][0][0]) - 1]
+                batch = tuple()
+                for _ in range(batch_size):
+                    # make batch with the same N for N-mix
+                    if len(batch) == 0 or int(batches[b][0][0]) == int(
+                        batch[0][0]
+                    ):
+                        batch += batches[b]
+                        b += 1
+                new_batches.append(batch)
+                if b >= len(batches):
+                    break
+            print(f"Old: {len(batches)}, New: {len(new_batches)}")
+            batches = new_batches
 
         bs_list = [len(batch) for batch in batches]
 
@@ -585,7 +639,9 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             num_noise_type=args.num_noise_type
             if hasattr(args, "num_noise_type")
             else 1,
-            sample_rate=args.sample_rate if hasattr(args, "sample_rate") else 8000,
+            sample_rate=args.sample_rate
+            if hasattr(args, "sample_rate")
+            else 8000,
             force_single_channel=args.force_single_channel
             if hasattr(args, "force_single_channel")
             else False,
@@ -598,31 +654,44 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
         cls, train: bool = True, inference: bool = False
     ) -> Tuple[str, ...]:
         if not inference:
-            retval = ("speech_mix", "enroll_ref1", "speech_ref1", "enroll_ref2", "speech_ref2")
+            retval = (
+                "speech_mix",
+                "enroll_ref1",
+                "speech_ref1",
+                "enroll_ref2",
+                "speech_ref2",
+            )
         else:
             # Inference mode
             retval = ("speech_mix", "enroll_ref1")
+            # retval = ("speech_mix", )
         return retval
 
     @classmethod
     def optional_data_names(
         cls, train: bool = True, inference: bool = False
     ) -> Tuple[str, ...]:
-        retval = ["enroll_ref{}".format(n) for n in range(2, MAX_REFERENCE_NUM + 1)]
+        retval = [
+            "enroll_ref{}".format(n) for n in range(2, MAX_REFERENCE_NUM + 1)
+        ]
         if "speech_ref1" in retval:
             retval += [
-                "speech_ref{}".format(n) for n in range(2, MAX_REFERENCE_NUM + 1)
+                "speech_ref{}".format(n)
+                for n in range(2, MAX_REFERENCE_NUM + 1)
             ]
         else:
             retval += [
-                "speech_ref{}".format(n) for n in range(1, MAX_REFERENCE_NUM + 1)
+                "speech_ref{}".format(n)
+                for n in range(1, MAX_REFERENCE_NUM + 1)
             ]
         retval = tuple(retval)
         assert check_return_type(retval)
         return retval
 
     @classmethod
-    def build_model(cls, args: argparse.Namespace) -> ESPnetExtractionEnhancementModel:
+    def build_model(
+        cls, args: argparse.Namespace
+    ) -> ESPnetExtractionEnhancementModel:
         assert check_argument_types()
         encoder = encoder_choices.get_class(args.encoder)(**args.encoder_conf)
         extractor = extractor_choices.get_class(args.extractor)(
@@ -636,7 +705,9 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             # that packed by older version
             for ctr in args.criterions:
                 criterion_conf = ctr.get("conf", {})
-                criterion = criterion_choices.get_class(ctr["name"])(**criterion_conf)
+                criterion = criterion_choices.get_class(ctr["name"])(
+                    **criterion_conf
+                )
                 loss_wrapper = loss_wrapper_choices.get_class(ctr["wrapper"])(
                     criterion=criterion, **ctr["wrapper_conf"]
                 )
@@ -648,7 +719,7 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             extractor=extractor,
             decoder=decoder,
             loss_wrappers=loss_wrappers,
-            **args.model_conf
+            **args.model_conf,
         )
 
         # FIXME(kamo): Should be done in model?
