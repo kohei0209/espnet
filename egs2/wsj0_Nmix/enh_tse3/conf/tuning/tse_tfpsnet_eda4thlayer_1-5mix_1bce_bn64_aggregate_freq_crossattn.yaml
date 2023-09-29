@@ -1,6 +1,6 @@
 task: &task tse
 optim: adam
-max_epoch: 5
+max_epoch: 30
 batch_type: folded
 sort_batch: descending
 batch_size: 1
@@ -12,10 +12,10 @@ chunk_length: 32000
 chunk_excluded_key_prefixes:
   - "enroll_ref"
   - "utt2category"
-# - "speech_ref"
+remove_samples_with_speaker_overlap: false
 num_workers: 8
 optim_conf:
-  lr: 5.0e-05
+  lr: 2.0e-05
   eps: 1.0e-04
   weight_decay: 0
 unused_parameters: true
@@ -74,10 +74,11 @@ extractor_conf:
   nonlinear: relu
   i_eda_layer: 3
   i_adapt_layer: 4
-  adapt_layer_type: tfattn_improved
+  num_aux_tfps_blocks: 2
+  adapt_layer_type: crossattn
   adapt_enroll_dim: *bn
-  adapt_attention_dim: 128
-  adapt_hidden_dim: 128
+  adapt_attention_dim: 512
+  adapt_hidden_dim: 512
   adapt_softmax_temp: 1
 
 # A list for criterions
@@ -95,12 +96,12 @@ criterions:
       independent_perm: true
 
 use_amp: false
-use_wandb: false
+use_wandb: true
 wandb_project: use_preliminary_wsj
-wandb_name: NoisyRev_TFPSNetAggregateF_TSE_EDA4thLayer_Adapt5thlayer_2-5mix_SISNRLoss_ReduceLR_lr5e-5
+wandb_name: NoisyRevTFPSNetAggregateF_TSE_CrossAttn
 
 init_param:
-  - ./exp/enh_enh_tfpsnet_eda4thlayer_1-5mix_1bce_bn64_aggregate_freq_raw/20epoch.pth
+  - ./exp/enh_enh_tfpsnet_eda4thlayer_1-5mix_1bce_bn64_aggregate_freq_raw/ave_epochs_50_49_48_47_44.pth
 resume: false
 freeze_param:
   - extractor.post_encoder

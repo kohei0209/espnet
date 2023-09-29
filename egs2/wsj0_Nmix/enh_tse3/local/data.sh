@@ -21,7 +21,7 @@ EOF
 
 . ./db.sh
 
-wsj_full_wav=$PWD//data/wsj0
+wsj_full_wav=$PWD/data/wsj0
 wsj_mix_wav=$PWD/data/wsj0_mix
 wsj_mix_scripts=$PWD/data/wsj0_mix/scripts
 wsj_scp_output_dir=$PWD/data
@@ -34,8 +34,8 @@ nlsyms=data/nlsyms.txt
 min_or_max=min
 sample_rate=8k
 
-stage=1
-stop_stage=1
+stage=3
+stop_stage=100
 
 . utils/parse_options.sh
 
@@ -103,7 +103,7 @@ if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
     log "stage 1: Data simulation"
     ### This part is for WSJ0 mix
     # for task in tr cv tt; do
-    for task in cv tt; do
+    for task in tr cv tt; do
         # simulation
         local/simulation.sh \
             --min-or-max ${min_or_max} --sample-rate ${sample_rate} --task ${task} || exit 1;
@@ -152,7 +152,7 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
         python local/copy_enroll_files.py \
             --source_folder ./local/enroll_scp/${task}_min_8k \
             --target_folder ${wsj_scp_output_dir}/${task}_${min_or_max}_${sample_rate} \
-            --source_words ./ /min/ /wav8k/ \
+            --source_words ../enh_tse1/ /min/ /wav8k/ \
             --target_words ${PWD}/ /${min_or_max}/ /wav${sample_rate}/
 
         # for training set, we prepare scp files here
