@@ -32,7 +32,7 @@ nlsyms=data/nlsyms.txt
 min_or_max=min
 sample_rate=8k
 
-stage=3
+stage=0
 stop_stage=100
 
 . utils/parse_options.sh
@@ -155,11 +155,3 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
 
     done
 fi
-
-
-# if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
-#     log "stage 4: Prepare 1-mix data"
-#     ${PWD}/local/prepare_1speaker_audio_and_scp.sh \
-#         --min_or_max ${min_or_max} --sample_rate ${sample_rate}
-# fi
-

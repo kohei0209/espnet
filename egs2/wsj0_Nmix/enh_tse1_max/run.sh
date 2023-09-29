@@ -13,9 +13,9 @@ train_set="tr_${min_or_max}_${sample_rate}"
 valid_set="cv_${min_or_max}_${sample_rate}"
 test_sets="tt_${min_or_max}_${sample_rate} "
 
-config=./conf/tuning/train_enh_trial.yaml
+config=./conf/train.yaml
 
-./enh2.sh \
+./enh_tse.sh \
     --is_tse_task false \
     --is_tse_and_ss_task true \
     --train_set "${train_set}" \

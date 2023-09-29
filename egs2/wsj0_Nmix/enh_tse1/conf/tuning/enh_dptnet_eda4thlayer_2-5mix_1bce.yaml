@@ -94,7 +94,3 @@ criterions:
       wrapper_conf:
           weight: 1.0
           independent_perm: true
-
-use_wandb: true
-wandb_project: use_preliminary_wsj
-wandb_name: DPTNet_Sep_EDA4thLayer_2-5mix_1BCELoss

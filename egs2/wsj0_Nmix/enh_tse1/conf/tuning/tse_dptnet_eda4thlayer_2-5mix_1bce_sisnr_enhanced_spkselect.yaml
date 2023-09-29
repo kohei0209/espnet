@@ -99,10 +99,6 @@ criterions:
           weight: 1.0
           independent_perm: true
 
-use_wandb: true
-wandb_project: use_preliminary_wsj
-wandb_name: DPTNet_TSE_EDA4thLayer_ImprovedAdapt5thlayer_2-5mix
-
 init_param:
     - ./exp/enh_enh_dptnet_eda4thlayer_2-5mix_1bce_raw/ave_5best.pth
 resume: false

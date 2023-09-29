@@ -1,10 +1,9 @@
-task: &task tse
 optim: adam
-max_epoch: 50
+max_epoch: 100
 batch_type: folded
 sort_batch: descending
 batch_size: 4
-valid_batch_size: 2
+valid_batch_size: 4
 iterator_type: sequence
 chunk_length: 32000
 # exclude keys "enroll_ref", "enroll_ref1", "enroll_ref2", ...
@@ -12,7 +11,6 @@ chunk_length: 32000
 chunk_excluded_key_prefixes:
     - "enroll_ref"
     - "utt2category"
-    - "num_spk"
 # - "speech_ref"
 num_workers: 8
 optim_conf:
@@ -33,26 +31,26 @@ best_model_criterion:
     - - valid
       - loss
       - min
-keep_nbest_models: 5
+keep_nbest_models: 10
 scheduler: warmupsteplr
 scheduler_conf:
     # for WarmupLR
-    warmup_steps: 10000
+    warmup_steps: 20000
     # for StepLR
-    steps_per_epoch: 20120
+    steps_per_epoch: 22632
     step_size: 2
     gamma: 0.98
 
 model_conf:
     num_spk: 5
     share_encoder: true
-    task: *task
+    task: enh
     normalization: true
 
 train_spk2enroll: data/tr_min_8k/spk2enroll.json
 enroll_segment: 32000
 load_spk_embedding: false
-load_all_speakers: false
+load_all_speakers: true
 
 encoder: conv
 encoder_conf:
@@ -79,12 +77,9 @@ extractor_conf:
     nonlinear: prelu
     triple_path: false
     i_eda_layer: 3
-    i_adapt_layer: 4
+    i_adapt_layer: null
     adapt_layer_type: attn
     adapt_enroll_dim: 64
-    adapt_attention_dim: 512
-    adapt_hidden_dim: 512
-    adapt_softmax_temp: 1
 
 # A list for criterions
 # The overlall loss in the multi-task learning will be:
@@ -101,17 +96,5 @@ criterions:
           independent_perm: true
 
 init_param:
-    - ./exp/enh_enh_dptnet_eda4thlayer_2-5mix_1bce_raw/ave_5best.pth
+    - ../enh_tse1/exp/enh_enh_dptnet_eda4thlayer_2-5mix_1bce_raw/175epoch.pth
 resume: false
-freeze_param:
-    - encoder
-    - extractor.enc_LN
-    - extractor.dptnet.row_transformer
-    - extractor.dptnet.col_transformer
-    - extractor.dptnet.output
-    - extractor.dptnet.sequence_aggregation
-    - extractor.dptnet.eda
-    - extractor.output
-    - extractor.nonlinear
-    - extractor.output_gate
-    - decoder
