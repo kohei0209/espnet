@@ -1,10 +1,9 @@
-task: &task enh
 optim: adam
 max_epoch: 50
 batch_type: folded
 sort_batch: descending
-batch_size: 2
-valid_batch_size: 2
+batch_size: 1
+valid_batch_size: 1
 iterator_type: sequence
 chunk_length: 32000
 # exclude keys "enroll_ref", "enroll_ref1", "enroll_ref2", ...
@@ -12,11 +11,11 @@ chunk_length: 32000
 chunk_excluded_key_prefixes:
   - "enroll_ref"
   - "utt2category"
-
+# - "speech_ref"
 num_workers: 8
 optim_conf:
   lr: 2.0e-04
-  eps: 1.0e-04
+  eps: 1.0e-08
   weight_decay: 0
 unused_parameters: true
 patience: 5
@@ -32,7 +31,7 @@ best_model_criterion:
   - - valid
     - loss
     - min
-keep_nbest_models: 10
+keep_nbest_models: 5
 scheduler: warmupreducelr
 scheduler_conf:
   # for WarmupLR
@@ -51,36 +50,34 @@ enroll_segment: 32000
 load_spk_embedding: false
 load_all_speakers: true
 
-encoder: stft
+encoder: conv
 encoder_conf:
-  n_fft: 256
-  hop_length: 128
-decoder: stft
+  channel: 64
+  kernel_size: 16
+  stride: 8
+decoder: conv
 decoder_conf:
-  n_fft: 256
-  hop_length: 128
-extractor: tfpsnet_multidecoder
+  channel: 64
+  kernel_size: 16
+  stride: 8
+extractor: dptnet_eda
 extractor_conf:
   num_spk: 5
-  num_spk_list: [2, 3, 4, 5]
-  enc_channels: 256
-  bottleneck_size: 64
-  separator_type: transformer
-  tfps_blocks: [1, 1, 1, 1, 1, 1]
-  att_heads: 4
+  layer: 6
   rnn_type: lstm
-  bidirectional: true
-  unit: &unit 128
-  dropout: 0.0
+  bidirectional: True # this is for the inter-block rnn
+  unit: 128
+  segment_size: 100
+  att_heads: 4
+  dropout: 0
+  activation: relu
   norm_type: gLN
-  nonlinear: relu
-  masking: true
-  # multi-decoder arguments
-  num_decoder_layer: 2
-  decoder_unit: *unit
-  # tse related
-  num_aux_tfps_blocks: 2
-  adapt_hidden_dim: 512
+  nonlinear: prelu
+  triple_path: false
+  i_eda_layer: 3
+  i_adapt_layer: null
+  adapt_layer_type: attn
+  adapt_enroll_dim: 64
 
 # A list for criterions
 # The overlall loss in the multi-task learning will be:
@@ -90,14 +87,13 @@ criterions:
   # The first criterion
   - name: si_snr
     conf:
-      eps: 1.0e-8
+      eps: 1.0e-7
     wrapper: pit
     wrapper_conf:
-      weight: 1
+      weight: 1.0
       independent_perm: true
 
 use_amp: false
-use_wandb: false
-log_interval: 100
+use_wandb: true
 wandb_project: use_preliminary_wsj
-wandb_name: DEBUG_TFPSNetAggrregateF_Sep_EDA4thLayer_2-5mix_SISNRLoss+1BCELoss_ReduceLR_lr2e-4_AMP
+wandb_name: Anechoic_DPTNet_Sep_EDA4thLayer_2-5mix_1BCELoss_bs1

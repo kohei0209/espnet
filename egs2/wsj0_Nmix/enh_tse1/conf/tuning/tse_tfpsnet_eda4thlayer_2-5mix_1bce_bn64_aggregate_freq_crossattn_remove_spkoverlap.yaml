@@ -1,6 +1,6 @@
 task: &task tse
 optim: adam
-max_epoch: 20
+max_epoch: 30
 batch_type: folded
 sort_batch: descending
 batch_size: 1
@@ -12,7 +12,7 @@ chunk_length: 32000
 chunk_excluded_key_prefixes:
   - "enroll_ref"
   - "utt2category"
-# - "speech_ref"
+remove_samples_with_speaker_overlap: true
 num_workers: 8
 optim_conf:
   lr: 2.0e-05
@@ -75,7 +75,7 @@ extractor_conf:
   i_eda_layer: 3
   i_adapt_layer: 4
   num_aux_tfps_blocks: 2
-  adapt_layer_type: tfattn
+  adapt_layer_type: crossattn
   adapt_enroll_dim: *bn
   adapt_attention_dim: 512
   adapt_hidden_dim: 512
@@ -98,7 +98,7 @@ criterions:
 use_amp: false
 use_wandb: true
 wandb_project: use_preliminary_wsj
-wandb_name: TFPSNetAggregateF_TSE_EDA4thLayer_AttnWithoutFreqAverage
+wandb_name: TFPSNetAggregateF_TSE_CrossAttn_RemoveSpkOverlap
 
 init_param:
   - ./exp/enh_enh_tfpsnet_eda4thlayer_2-5mix_1bce_bn64_aggregate_freq_raw/ave_epochs_50_49_48_47_46.pth

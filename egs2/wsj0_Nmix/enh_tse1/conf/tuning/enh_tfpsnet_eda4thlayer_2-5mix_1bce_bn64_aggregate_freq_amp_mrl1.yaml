@@ -1,6 +1,5 @@
-task: &task tse
 optim: adam
-max_epoch: 20
+max_epoch: 50
 batch_type: folded
 sort_batch: descending
 batch_size: 1
@@ -12,10 +11,10 @@ chunk_length: 32000
 chunk_excluded_key_prefixes:
   - "enroll_ref"
   - "utt2category"
-# - "speech_ref"
+
 num_workers: 8
 optim_conf:
-  lr: 2.0e-05
+  lr: 2.0e-04
   eps: 1.0e-04
   weight_decay: 0
 unused_parameters: true
@@ -32,7 +31,7 @@ best_model_criterion:
   - - valid
     - loss
     - min
-keep_nbest_models: 5
+keep_nbest_models: 10
 scheduler: warmupreducelr
 scheduler_conf:
   # for WarmupLR
@@ -43,13 +42,13 @@ scheduler_conf:
 model_conf:
   num_spk: 5
   share_encoder: true
-  task: *task
+  task: enh
   normalization: true
 
 train_spk2enroll: data/tr_min_8k/spk2enroll.json
 enroll_segment: 32000
 load_spk_embedding: false
-load_all_speakers: false
+load_all_speakers: true
 
 encoder: stft
 encoder_conf:
@@ -63,7 +62,8 @@ extractor: tfpsnet_eda
 extractor_conf:
   num_spk: 1
   enc_channels: 256
-  bottleneck_size: &bn 64
+  bottleneck_size: 64
+  masking: true
   separator_type: transformer
   tfps_blocks: [1, 1, 1, 1, 1, 1]
   rnn_type: lstm
@@ -73,12 +73,8 @@ extractor_conf:
   norm_type: gLN
   nonlinear: relu
   i_eda_layer: 3
-  i_adapt_layer: 4
-  adapt_layer_type: crossattn_improved
-  adapt_enroll_dim: *bn
-  adapt_attention_dim: 512
-  adapt_hidden_dim: 512
-  adapt_softmax_temp: 1
+  i_adapt_layer: null
+  adapt_enroll_dim: 64
 
 # A list for criterions
 # The overlall loss in the multi-task learning will be:
@@ -86,31 +82,25 @@ extractor_conf:
 # The default `weight` for each sub-loss is 1.0
 criterions:
   # The first criterion
-  - name: si_snr
+  - name: mr_l1_tfd
     conf:
-      eps: 1.0e-7
+      eps: 1.0e-4
+      scale_invariant: false
+      mean_or_sum: sum
     wrapper: pit
     wrapper_conf:
-      weight: 1
+      weight: 0.01
       independent_perm: true
+  - name: si_snr
+    conf:
+      eps: 1.0e-4
+    wrapper: pit
+    wrapper_conf:
+      weight: 0
+      independent_perm: false
 
-use_amp: false
-use_wandb: false
-wandb_project: use_preliminary_wsj
-wandb_name: TFPSNetAggregateF_TSE_AggregateFreqs
-
-init_param:
-  - ./exp/enh_enh_tfpsnet_eda4thlayer_2-5mix_1bce_bn64_aggregate_freq_raw/ave_epochs_50_49_48_47_46.pth
-resume: false
-freeze_param:
-  - extractor.post_encoder
-  - extractor.tfpsnet.layer_norm
-  - extractor.tfpsnet.bottleneck_conv1x1
-  - extractor.tfpsnet.tfps_blocks
-  - extractor.tfpsnet.sequence_aggregation
-  - extractor.tfpsnet.eda
-  - extractor.tfpsnet.output
-  - extractor.pre_decoder
-  - extractor.output
-  - extractor.output_gate
-  - extractor.nonlinear
+use_amp: true
+use_wandb: true
+# log_interval: 100
+wandb_project: muse_jornal
+wandb_name: Anechoic_Sep_TFPSNet_2-5mix_MRL1+1BCE_ReduceLR_lr2e-4_AMP

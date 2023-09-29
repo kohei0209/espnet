@@ -9,42 +9,42 @@ chunk_length: 32000
 # exclude keys "enroll_ref", "enroll_ref1", "enroll_ref2", ...
 # from the length consistency check in ChunkIterFactory
 chunk_excluded_key_prefixes:
-- "enroll_ref"
-- "utt2category"
+  - "enroll_ref"
+  - "utt2category"
 # - "speech_ref"
 num_workers: 8
 optim_conf:
-    lr: 4.0e-04
-    eps: 1.0e-04
-    weight_decay: 0
+  lr: 4.0e-04
+  eps: 1.0e-04
+  weight_decay: 0
 unused_parameters: true
 patience: 10
 accum_grad: 1
 grad_clip: 5.0
 val_scheduler_criterion:
-- valid
-- loss
+  - valid
+  - loss
 best_model_criterion:
--   - valid
+  - - valid
     - snr
     - max
--   - valid
+  - - valid
     - loss
     - min
 keep_nbest_models: 10
 scheduler: warmupreducelr
 scheduler_conf:
-   # for WarmupLR
-   warmup_steps: 10000
-   # for StepLR
-   factor: 0.7
-   patience: 3
+  # for WarmupLR
+  warmup_steps: 10000
+  # for StepLR
+  factor: 0.7
+  patience: 3
 
 model_conf:
-    num_spk: 5
-    share_encoder: true
-    task: enh
-    normalization: true
+  num_spk: 5
+  share_encoder: true
+  task: enh
+  normalization: true
 
 train_spk2enroll: data/tr_min_8k/spk2enroll.json
 enroll_segment: 32000
@@ -53,32 +53,32 @@ load_all_speakers: true
 
 encoder: conv
 encoder_conf:
-    channel: 64
-    kernel_size: 16
-    stride: 8
+  channel: 64
+  kernel_size: 16
+  stride: 8
 decoder: conv
 decoder_conf:
-    channel: 64
-    kernel_size: 16
-    stride: 8
+  channel: 64
+  kernel_size: 16
+  stride: 8
 extractor: dptnet_eda
 extractor_conf:
-    num_spk: 5
-    layer: 6
-    rnn_type: lstm
-    bidirectional: True  # this is for the inter-block rnn
-    unit: 128
-    segment_size: 100
-    att_heads: 4
-    dropout: 0
-    activation: relu
-    norm_type: gLN
-    nonlinear: prelu
-    triple_path: false
-    i_eda_layer: 3
-    i_adapt_layer: null
-    adapt_layer_type: attn
-    adapt_enroll_dim: 64
+  num_spk: 5
+  layer: 6
+  rnn_type: lstm
+  bidirectional: True # this is for the inter-block rnn
+  unit: 128
+  segment_size: 100
+  att_heads: 4
+  dropout: 0
+  activation: relu
+  norm_type: gLN
+  nonlinear: prelu
+  triple_path: false
+  i_eda_layer: 3
+  i_adapt_layer: null
+  adapt_layer_type: attn
+  adapt_enroll_dim: 64
 
 # A list for criterions
 # The overlall loss in the multi-task learning will be:

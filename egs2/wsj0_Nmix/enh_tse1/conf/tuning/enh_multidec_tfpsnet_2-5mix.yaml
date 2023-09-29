@@ -13,9 +13,9 @@ chunk_excluded_key_prefixes:
   - "enroll_ref"
   - "utt2category"
 
-num_workers: 8
+num_workers: 4
 optim_conf:
-  lr: 2.0e-04
+  lr: 4.0e-04
   eps: 1.0e-04
   weight_decay: 0
 unused_parameters: true
@@ -32,7 +32,7 @@ best_model_criterion:
   - - valid
     - loss
     - min
-keep_nbest_models: 10
+keep_nbest_models: 5
 scheduler: warmupreducelr
 scheduler_conf:
   # for WarmupLR
@@ -43,7 +43,7 @@ scheduler_conf:
 model_conf:
   num_spk: 5
   share_encoder: true
-  task: enh
+  task: *task
   normalization: true
 
 train_spk2enroll: data/tr_min_8k/spk2enroll.json
@@ -90,14 +90,14 @@ criterions:
   # The first criterion
   - name: si_snr
     conf:
-      eps: 1.0e-8
+      eps: 1.0e-7
     wrapper: pit
     wrapper_conf:
       weight: 1
       independent_perm: true
 
 use_amp: false
-use_wandb: false
-log_interval: 100
-wandb_project: use_preliminary_wsj
-wandb_name: DEBUG_TFPSNetAggrregateF_Sep_EDA4thLayer_2-5mix_SISNRLoss+1BCELoss_ReduceLR_lr2e-4_AMP
+use_wandb: true
+# log_interval: 50
+wandb_project: muse_jornal
+wandb_name: Sep_MultiDecTFPSNet_2-5mix_SISNRLoss+1BCELoss_ReduceLR_lr4e-4

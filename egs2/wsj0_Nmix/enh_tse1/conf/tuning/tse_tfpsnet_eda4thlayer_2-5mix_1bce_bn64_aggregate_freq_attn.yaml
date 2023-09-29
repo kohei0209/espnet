@@ -1,10 +1,10 @@
-task: &task enh
+task: &task tse
 optim: adam
-max_epoch: 50
+max_epoch: 30
 batch_type: folded
 sort_batch: descending
-batch_size: 2
-valid_batch_size: 2
+batch_size: 1
+valid_batch_size: 1
 iterator_type: sequence
 chunk_length: 32000
 # exclude keys "enroll_ref", "enroll_ref1", "enroll_ref2", ...
@@ -12,10 +12,10 @@ chunk_length: 32000
 chunk_excluded_key_prefixes:
   - "enroll_ref"
   - "utt2category"
-
+remove_samples_with_speaker_overlap: false
 num_workers: 8
 optim_conf:
-  lr: 2.0e-04
+  lr: 2.0e-05
   eps: 1.0e-04
   weight_decay: 0
 unused_parameters: true
@@ -32,7 +32,7 @@ best_model_criterion:
   - - valid
     - loss
     - min
-keep_nbest_models: 10
+keep_nbest_models: 5
 scheduler: warmupreducelr
 scheduler_conf:
   # for WarmupLR
@@ -43,13 +43,13 @@ scheduler_conf:
 model_conf:
   num_spk: 5
   share_encoder: true
-  task: enh
+  task: *task
   normalization: true
 
 train_spk2enroll: data/tr_min_8k/spk2enroll.json
 enroll_segment: 32000
 load_spk_embedding: false
-load_all_speakers: true
+load_all_speakers: false
 
 encoder: stft
 encoder_conf:
@@ -59,28 +59,27 @@ decoder: stft
 decoder_conf:
   n_fft: 256
   hop_length: 128
-extractor: tfpsnet_multidecoder
+extractor: tfpsnet_eda
 extractor_conf:
-  num_spk: 5
-  num_spk_list: [2, 3, 4, 5]
+  num_spk: 1
   enc_channels: 256
-  bottleneck_size: 64
+  bottleneck_size: &bn 64
   separator_type: transformer
   tfps_blocks: [1, 1, 1, 1, 1, 1]
-  att_heads: 4
   rnn_type: lstm
   bidirectional: true
-  unit: &unit 128
+  unit: 128
   dropout: 0.0
   norm_type: gLN
   nonlinear: relu
-  masking: true
-  # multi-decoder arguments
-  num_decoder_layer: 2
-  decoder_unit: *unit
-  # tse related
+  i_eda_layer: 3
+  i_adapt_layer: 4
   num_aux_tfps_blocks: 2
+  adapt_layer_type: tfattn
+  adapt_enroll_dim: *bn
+  adapt_attention_dim: 512
   adapt_hidden_dim: 512
+  adapt_softmax_temp: 1
 
 # A list for criterions
 # The overlall loss in the multi-task learning will be:
@@ -90,14 +89,29 @@ criterions:
   # The first criterion
   - name: si_snr
     conf:
-      eps: 1.0e-8
+      eps: 1.0e-7
     wrapper: pit
     wrapper_conf:
       weight: 1
       independent_perm: true
 
 use_amp: false
-use_wandb: false
-log_interval: 100
+use_wandb: true
 wandb_project: use_preliminary_wsj
-wandb_name: DEBUG_TFPSNetAggrregateF_Sep_EDA4thLayer_2-5mix_SISNRLoss+1BCELoss_ReduceLR_lr2e-4_AMP
+wandb_name: TFPSNetAggregateF_TSE_EDA4thLayer
+
+init_param:
+  - ./exp/enh_enh_tfpsnet_eda4thlayer_2-5mix_1bce_bn64_aggregate_freq_raw/ave_epochs_50_49_48_47_46.pth
+resume: false
+freeze_param:
+  - extractor.post_encoder
+  - extractor.tfpsnet.layer_norm
+  - extractor.tfpsnet.bottleneck_conv1x1
+  - extractor.tfpsnet.tfps_blocks
+  - extractor.tfpsnet.sequence_aggregation
+  - extractor.tfpsnet.eda
+  - extractor.tfpsnet.output
+  - extractor.pre_decoder
+  - extractor.output
+  - extractor.output_gate
+  - extractor.nonlinear

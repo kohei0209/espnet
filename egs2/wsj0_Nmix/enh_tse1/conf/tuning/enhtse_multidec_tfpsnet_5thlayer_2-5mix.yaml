@@ -1,6 +1,6 @@
-task: &task tse
+task: &task enh_tse
 optim: adam
-max_epoch: 20
+max_epoch: 50
 batch_type: folded
 sort_batch: descending
 batch_size: 1
@@ -12,10 +12,10 @@ chunk_length: 32000
 chunk_excluded_key_prefixes:
   - "enroll_ref"
   - "utt2category"
-# - "speech_ref"
-num_workers: 8
+
+num_workers: 4
 optim_conf:
-  lr: 2.0e-05
+  lr: 4.0e-04
   eps: 1.0e-04
   weight_decay: 0
 unused_parameters: true
@@ -49,7 +49,7 @@ model_conf:
 train_spk2enroll: data/tr_min_8k/spk2enroll.json
 enroll_segment: 32000
 load_spk_embedding: false
-load_all_speakers: false
+load_all_speakers: true
 
 encoder: stft
 encoder_conf:
@@ -59,27 +59,29 @@ decoder: stft
 decoder_conf:
   n_fft: 256
   hop_length: 128
-extractor: tfpsnet_eda
+extractor: tfpsnet_multidecoder
 extractor_conf:
-  num_spk: 1
+  num_spk: 5
+  num_spk_list: [2, 3, 4, 5]
   enc_channels: 256
-  bottleneck_size: &bn 64
+  bottleneck_size: 64
   separator_type: transformer
   tfps_blocks: [1, 1, 1, 1, 1, 1]
+  att_heads: 4
   rnn_type: lstm
   bidirectional: true
-  unit: 128
+  unit: &unit 64
   dropout: 0.0
   norm_type: gLN
   nonlinear: relu
-  i_eda_layer: 3
-  i_adapt_layer: 3
+  masking: true
+  # multi-decoder arguments
+  num_decoder_layer: 1
+  decoder_unit: *unit
+  # tse related
+  use_tse_decoder: true
   num_aux_tfps_blocks: 2
-  adapt_layer_type: crossattn
-  adapt_enroll_dim: *bn
-  adapt_attention_dim: 512
-  adapt_hidden_dim: 512
-  adapt_softmax_temp: 1
+  adapt_hidden_dim: 256
 
 # A list for criterions
 # The overlall loss in the multi-task learning will be:
@@ -97,21 +99,6 @@ criterions:
 
 use_amp: false
 use_wandb: true
-wandb_project: use_preliminary_wsj
-wandb_name: TFPSNetAggregateF_TSE4thlayer_AggregateFreqs_CrossAttn_Aux2Blocks
-
-init_param:
-  - ./exp/enh_enh_tfpsnet_eda4thlayer_2-5mix_1bce_bn64_aggregate_freq_raw/ave_epochs_50_49_48_47_46.pth
-resume: false
-freeze_param:
-  - extractor.post_encoder
-  - extractor.tfpsnet.layer_norm
-  - extractor.tfpsnet.bottleneck_conv1x1
-  - extractor.tfpsnet.tfps_blocks
-  - extractor.tfpsnet.sequence_aggregation
-  - extractor.tfpsnet.eda
-  - extractor.tfpsnet.output
-  - extractor.pre_decoder
-  - extractor.output
-  - extractor.output_gate
-  - extractor.nonlinear
+# log_interval: 100
+wandb_project: muse_jornal
+wandb_name: SepTSE_SmallMultiDecTFPSNet_5thlayer_2-5mix_SISNRLoss+1BCELoss_ReduceLR_lr4e-4

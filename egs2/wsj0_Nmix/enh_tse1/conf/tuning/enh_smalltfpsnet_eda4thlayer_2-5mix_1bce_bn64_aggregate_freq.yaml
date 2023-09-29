@@ -1,10 +1,9 @@
-task: &task enh
 optim: adam
 max_epoch: 50
 batch_type: folded
 sort_batch: descending
-batch_size: 2
-valid_batch_size: 2
+batch_size: 1
+valid_batch_size: 1
 iterator_type: sequence
 chunk_length: 32000
 # exclude keys "enroll_ref", "enroll_ref1", "enroll_ref2", ...
@@ -12,7 +11,7 @@ chunk_length: 32000
 chunk_excluded_key_prefixes:
   - "enroll_ref"
   - "utt2category"
-
+# - "speech_ref"
 num_workers: 8
 optim_conf:
   lr: 2.0e-04
@@ -53,34 +52,32 @@ load_all_speakers: true
 
 encoder: stft
 encoder_conf:
-  n_fft: 256
-  hop_length: 128
+  n_fft: 512
+  hop_length: 256
 decoder: stft
 decoder_conf:
-  n_fft: 256
-  hop_length: 128
-extractor: tfpsnet_multidecoder
+  n_fft: 512
+  hop_length: 256
+extractor: tfpsnet_eda
 extractor_conf:
-  num_spk: 5
-  num_spk_list: [2, 3, 4, 5]
-  enc_channels: 256
-  bottleneck_size: 64
+  num_spk: 1
+  enc_channels: 64
+  bottleneck_size: 32
+  masking: true
   separator_type: transformer
   tfps_blocks: [1, 1, 1, 1, 1, 1]
-  att_heads: 4
   rnn_type: lstm
   bidirectional: true
-  unit: &unit 128
+  unit: 64
   dropout: 0.0
   norm_type: gLN
   nonlinear: relu
-  masking: true
-  # multi-decoder arguments
-  num_decoder_layer: 2
-  decoder_unit: *unit
-  # tse related
-  num_aux_tfps_blocks: 2
-  adapt_hidden_dim: 512
+  # eda
+  i_eda_layer: 3
+  unit_after_eda: 32
+  # tse
+  i_adapt_layer: null
+  adapt_enroll_dim: 64
 
 # A list for criterions
 # The overlall loss in the multi-task learning will be:
@@ -90,14 +87,13 @@ criterions:
   # The first criterion
   - name: si_snr
     conf:
-      eps: 1.0e-8
+      eps: 1.0e-7
     wrapper: pit
     wrapper_conf:
       weight: 1
       independent_perm: true
 
 use_amp: false
-use_wandb: false
-log_interval: 100
+use_wandb: true
 wandb_project: use_preliminary_wsj
-wandb_name: DEBUG_TFPSNetAggrregateF_Sep_EDA4thLayer_2-5mix_SISNRLoss+1BCELoss_ReduceLR_lr2e-4_AMP
+wandb_name: TFPSNetAggrregateF_Sep_EDA4thLayer_2-5mix_SISNRLoss+1BCELoss_ReduceLR_lr2e-4
