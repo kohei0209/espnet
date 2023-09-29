@@ -71,7 +71,9 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         self.loss_wrappers = loss_wrappers
         names = [w.criterion.name for w in self.loss_wrappers]
         if len(set(names)) != len(names):
-            raise ValueError("Duplicated loss names are not allowed: {}".format(names))
+            raise ValueError(
+                "Duplicated loss names are not allowed: {}".format(names)
+            )
         for w in self.loss_wrappers:
             if getattr(w.criterion, "is_noise_loss", False):
                 raise ValueError("is_noise_loss=True is not supported")
@@ -113,7 +115,9 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
             kwargs: "utt_id" is among the input.
         """
         # reference speech signal of each speaker
-        assert "speech_ref1" in kwargs, "At least 1 reference signal input is required."
+        assert (
+            "speech_ref1" in kwargs
+        ), "At least 1 reference signal input is required."
         speech_ref = [
             kwargs.get(
                 f"speech_ref{spk + 1}",
@@ -132,7 +136,9 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         batch_size = speech_mix.shape[0]
 
         if "tse" in self.task:
-            assert "enroll_ref1" in kwargs, "At least 1 enrollment signal is required."
+            assert (
+                "enroll_ref1" in kwargs
+            ), "At least 1 enrollment signal is required."
             # enrollment signal for each speaker (as the target)
             enroll_ref = [
                 # (Batch, samples_aux)
@@ -150,7 +156,9 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                 # (Batch,)
                 kwargs.get(
                     "enroll_ref{}_lengths".format(spk + 1),
-                    torch.ones(batch_size).int().fill_(enroll_ref[spk].size(1)),
+                    torch.ones(batch_size)
+                    .int()
+                    .fill_(enroll_ref[spk].size(1)),
                 )
                 for spk in range(self.num_spk)
                 if "enroll_ref{}".format(spk + 1) in kwargs
@@ -160,7 +168,8 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
             # noise signal (optional, required when using beamforming-based
             # frontend models)
             noise_ref = [
-                kwargs["noise_ref{}".format(n + 1)] for n in range(self.num_noise_type)
+                kwargs["noise_ref{}".format(n + 1)]
+                for n in range(self.num_noise_type)
             ]
             # (Batch, num_noise_type, samples) or
             # (Batch, num_noise_type, samples, channels)
@@ -195,21 +204,30 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         )
         assert speech_lengths.dim() == 1, speech_lengths.shape
         # Check that batch_size is unified
-        assert speech_mix.shape[0] == speech_ref.shape[0] == speech_lengths.shape[0], (
+        assert (
+            speech_mix.shape[0]
+            == speech_ref.shape[0]
+            == speech_lengths.shape[0]
+        ), (
             speech_mix.shape,
             speech_ref.shape,
             speech_lengths.shape,
         )
         if "tse" in self.task:
             for aux in enroll_ref:
-                assert aux.shape[0] == speech_mix.shape[0], (aux.shape, speech_mix.shape)
+                assert aux.shape[0] == speech_mix.shape[0], (
+                    aux.shape,
+                    speech_mix.shape,
+                )
 
         # for data-parallel
         speech_ref = speech_ref[..., : speech_lengths.max()].unbind(dim=1)
         if noise_ref is not None:
             noise_ref = noise_ref[..., : speech_lengths.max()].unbind(dim=1)
         if dereverb_speech_ref is not None:
-            dereverb_speech_ref = dereverb_speech_ref[..., : speech_lengths.max()]
+            dereverb_speech_ref = dereverb_speech_ref[
+                ..., : speech_lengths.max()
+            ]
             dereverb_speech_ref = dereverb_speech_ref.unbind(dim=1)
 
         speech_mix = speech_mix[:, : speech_lengths.max()]
@@ -218,51 +236,92 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                 enroll_ref[spk][:, : enroll_ref_lengths[spk].max()]
                 for spk in range(len(enroll_ref))
             ]
-            assert len(speech_ref) == len(enroll_ref), (len(speech_ref), len(enroll_ref))
+            assert len(speech_ref) == len(enroll_ref), (
+                len(speech_ref),
+                len(enroll_ref),
+            )
 
         if "num_spk" in kwargs:
             num_spk = int(kwargs["num_spk"][0].cpu().numpy())
         else:
             num_spk = len(speech_ref)
 
-        if self.task == "tse":
-            is_tse_list = [True]
-        elif self.task == "enh":
-            is_tse_list = [False]
-        else:
-            is_tse_list = [True, False]
         # loss computation loop
         loss = 0
-        stats, weight = [], torch.Tensor([0]).to(torch.int64).to(speech_ref[0].device)
-        for i, is_tse in enumerate(is_tse_list):
-            if is_tse:
-                if self.training:
-                    spk_idx = np.random.randint(0, len(speech_ref))
-                else:
-                    spk_idx = 0
-                speech_ref_tmp = [speech_ref[spk_idx]]
-                enroll_ref_tmp, enroll_ref_lengths_tmp = [enroll_ref[spk_idx]], [enroll_ref_lengths[spk_idx]]
+        stats, weight = [], torch.Tensor([0]).to(torch.int64).to(
+            speech_ref[0].device
+        )
+
+        if self.task == "tse":
+            if self.training:
+                spk_idx = np.random.randint(0, len(speech_ref))
             else:
+                spk_idx = 0
+            speech_ref_tmp = [speech_ref[spk_idx]]
+            enroll_ref_tmp, enroll_ref_lengths_tmp = [
+                enroll_ref[spk_idx]
+            ], [enroll_ref_lengths[spk_idx]]
+        elif self.task == "enh":
+            speech_ref_tmp = speech_ref
+            enroll_ref_tmp, enroll_ref_lengths_tmp = None, None
+        elif self.task == "enh_tse":
+            if self.training:
+                spk_idx = np.random.randint(0, len(speech_ref))
+            else:
+                spk_idx = 0
+            enroll_ref_tmp, enroll_ref_lengths_tmp = [
+                enroll_ref[spk_idx]
+            ], [enroll_ref_lengths[spk_idx]]
+        (
+            speech_pre,
+            feature_mix,
+            feature_pre,
+            others,
+        ) = self.forward_enhance(
+            speech_mix,
+            speech_lengths,
+            enroll_ref_tmp,
+            enroll_ref_lengths_tmp,
+            self.task,
+            num_spk=num_spk,
+            apply_normalization=self.normalization,
+        )
+
+        # ["enh"] or ["tse"] or ["enh", "tse"]
+        task_list = self.task.split("_")
+        for i, task in enumerate(task_list):
+            # first num_spk sources are enh outputs
+            if self.task == "enh_tse" and task == "enh":
                 speech_ref_tmp = speech_ref
-                enroll_ref_tmp, enroll_ref_lengths_tmp = None, None
-            speech_pre, feature_mix, feature_pre, others = self.forward_enhance(
-                speech_mix, speech_lengths, enroll_ref_tmp, enroll_ref_lengths_tmp, num_spk=num_spk,
-                is_tse=is_tse, apply_normalization=self.normalization,
-            )
+                speech_pre_tmp = speech_pre[:-1]
+                feature_mix_tmp = feature_mix[:-1]
+                feature_pre_tmp = feature_pre[:-1]
+            # last one output is tse output
+            elif self.task == "enh_tse" and task == "tse":
+                speech_ref_tmp = [speech_ref[spk_idx]]
+                speech_pre_tmp = [speech_pre[-1]]
+                feature_mix_tmp = [feature_mix[-1]]
+                feature_pre_tmp = [feature_pre[-1]]
+            # we just use outputs in enh or tse task
+            else:
+                speech_pre_tmp = speech_pre
+                feature_mix_tmp = feature_mix
+                feature_pre_tmp = feature_pre
+
             # loss computation
             l, s, w, _ = self.forward_loss(
-                speech_pre,
+                speech_pre_tmp,
                 speech_lengths,
-                feature_mix,
-                feature_pre,
+                feature_mix_tmp,
+                feature_pre_tmp,
                 others,
                 speech_ref_tmp,
                 noise_ref,
                 dereverb_speech_ref,
                 num_spk=num_spk,
-                is_tse=is_tse,
+                is_tse=(task == "tse"),
             )
-            loss += (l / len(is_tse_list))
+            loss += l / len(task_list)
             stats.append(s)
             weight += w
         stats = merge_two_dicts(stats)
@@ -274,19 +333,23 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         speech_lengths: torch.Tensor,
         enroll_ref: torch.Tensor,
         enroll_ref_lengths: torch.Tensor,
+        task: str,
         num_spk: int = None,
-        is_tse: bool = True,
         apply_normalization: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-
         if apply_normalization:
             speech_mix, mean, std = normalization(speech_mix)
-            if is_tse:
-                enroll_ref = [normalization(enroll_ref[spk])[0] for spk in range(len(enroll_ref))]
+            if enroll_ref is not None:
+                enroll_ref = [
+                    normalization(enroll_ref[spk])[0]
+                    for spk in range(len(enroll_ref))
+                ]
 
         with torch.cuda.amp.autocast(enabled=False):
-            feature_mix, flens = self.encoder(speech_mix.to(torch.float32), speech_lengths)
-
+            feature_mix, flens = self.encoder(
+                speech_mix.to(torch.float32), speech_lengths
+            )
+        """
         if is_tse:
             if self.share_encoder:
                 feature_aux, flens_aux = zip(
@@ -316,16 +379,27 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
             if feature_pre[0] is not None:
                 with torch.cuda.amp.autocast(enabled=False):
                     if is_complex(feature_pre[0]):
-                        speech_pre = [self.decoder(ps.to(torch.complex64), speech_lengths)[0] for ps in feature_pre]
+                        speech_pre = [
+                            self.decoder(
+                                ps.to(torch.complex64), speech_lengths
+                            )[0]
+                            for ps in feature_pre
+                        ]
                     else:
-                        speech_pre = [self.decoder(ps.to(torch.float32), speech_lengths)[0] for ps in feature_pre]
+                        speech_pre = [
+                            self.decoder(ps.to(torch.float32), speech_lengths)[
+                                0
+                            ]
+                            for ps in feature_pre
+                        ]
             else:
                 # some models (e.g. neural beamformer trained with mask loss)
                 # do not predict time-domain signal in the training stage
                 speech_pre = None
         else:
-            # feature_pre, flens, others = self.extractor(feature_mix, flens, additional)
-            feature_pre, flens, others = self.extractor(feature_mix, flens, num_spk=num_spk)
+            feature_pre, flens, others = self.extractor(
+                feature_mix, flens, num_spk=num_spk
+            )
             if feature_pre is not None:
                 # for models like SVoice that output multiple lists of separated signals
                 pre_is_multi_list = isinstance(feature_pre[0], (list, tuple))
@@ -335,16 +409,74 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                         for ps in feature_pre
                     ]
                 else:
-                    # speech_pre = [self.decoder(ps, speech_lengths)[0] for ps in feature_pre]
                     with torch.cuda.amp.autocast(enabled=False):
                         if is_complex(feature_pre[0]):
-                            speech_pre = [self.decoder(ps.to(torch.complex64), speech_lengths)[0] for ps in feature_pre]
+                            speech_pre = [
+                                self.decoder(
+                                    ps.to(torch.complex64), speech_lengths
+                                )[0]
+                                for ps in feature_pre
+                            ]
                         else:
-                            speech_pre = [self.decoder(ps.to(torch.float32), speech_lengths)[0] for ps in feature_pre]
+                            speech_pre = [
+                                self.decoder(
+                                    ps.to(torch.float32), speech_lengths
+                                )[0]
+                                for ps in feature_pre
+                            ]
             else:
                 # some models (e.g. neural beamformer trained with mask loss)
                 # do not predict time-domain signal in the training stage
                 speech_pre = None
+        """
+        if enroll_ref is not None:
+            assert "tse" in task, "Something wrong in forward_enhance"
+            if self.share_encoder:
+                feature_aux, flens_aux = zip(
+                    *[
+                        self.encoder(enroll_ref[spk], enroll_ref_lengths[spk])
+                        for spk in range(len(enroll_ref))
+                    ]
+                )
+                assert len(feature_aux) == 1
+                feature_aux, flens_aux = feature_aux[0], flens_aux[0]
+            else:
+                feature_aux = enroll_ref
+                flens_aux = enroll_ref_lengths
+        else:
+            feature_aux, flens_aux = None, None
+
+        feature_pre, _, others = self.extractor(
+            feature_mix,
+            flens,
+            feature_aux,
+            flens_aux,
+            suffix_tag="_spk1",
+            num_spk=num_spk,
+            task=task,
+        )
+
+        if feature_pre is not None:
+            with torch.cuda.amp.autocast(enabled=False):
+                if is_complex(feature_pre[0]):
+                    speech_pre = [
+                        self.decoder(
+                            ps.to(torch.complex64), speech_lengths
+                        )[0]
+                        for ps in feature_pre
+                    ]
+                else:
+                    speech_pre = [
+                        self.decoder(ps.to(torch.float32), speech_lengths)[
+                            0
+                        ]
+                        for ps in feature_pre
+                    ]
+        else:
+            # some models (e.g. neural beamformer trained with mask loss)
+            # do not predict time-domain signal in the training stage
+            speech_pre = None
+
         if apply_normalization:
             speech_pre = [(pre + mean) * std for pre in speech_pre]
         return speech_pre, feature_mix, feature_pre, others
@@ -362,16 +494,20 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         num_spk: int = None,
         is_tse: bool = True,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
-
         loss = 0.0
         stats = {}
         o = {}
         perm = None
         if is_tse:
-            assert len(speech_pre) == len(speech_ref) == 1, "TSE should output only 1 source"
+            assert (
+                len(speech_pre) == len(speech_ref) == 1
+            ), f"TSE should output only 1 source, {len(speech_pre)} {len(speech_ref)}"
             for loss_wrapper in self.loss_wrappers:
                 criterion = loss_wrapper.criterion
-                if getattr(criterion, "only_for_test", False) and self.training:
+                if (
+                    getattr(criterion, "only_for_test", False)
+                    and self.training
+                ):
                     continue
 
                 if isinstance(criterion, TimeDomainLoss):
@@ -399,12 +535,18 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                         )
                     else:
                         # compute on spectrum
-                        tf_ref = [self.encoder(sr, speech_lengths)[0] for sr in sref]
-                        tf_pre = [self.encoder(sp, speech_lengths)[0] for sp in spre]
+                        tf_ref = [
+                            self.encoder(sr, speech_lengths)[0] for sr in sref
+                        ]
+                        tf_pre = [
+                            self.encoder(sp, speech_lengths)[0] for sp in spre
+                        ]
 
                     l, s, o = loss_wrapper(tf_ref, tf_pre, {**others, **o})
                 else:
-                    raise NotImplementedError("Unsupported loss type: %s" % str(criterion))
+                    raise NotImplementedError(
+                        "Unsupported loss type: %s" % str(criterion)
+                    )
 
                 loss += l * loss_wrapper.weight
                 stats.update(s)
@@ -432,11 +574,16 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                 for spk in range(self.num_spk):
                     key = "dereverb{}".format(spk + 1)
                     if key in others:
-                        others[key] = self.decoder(others[key], speech_lengths)[0]
+                        others[key] = self.decoder(
+                            others[key], speech_lengths
+                        )[0]
 
             for loss_wrapper in self.loss_wrappers:
                 criterion = loss_wrapper.criterion
-                if getattr(criterion, "only_for_test", False) and self.training:
+                if (
+                    getattr(criterion, "only_for_test", False)
+                    and self.training
+                ):
                     continue
                 if getattr(criterion, "is_noise_loss", False):
                     if noise_ref is None:
@@ -446,7 +593,8 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                         )
                     signal_ref = noise_ref
                     signal_pre = [
-                        others["noise{}".format(n + 1)] for n in range(self.num_noise_type)
+                        others["noise{}".format(n + 1)]
+                        for n in range(self.num_noise_type)
                     ]
                 elif getattr(criterion, "is_dereverb_loss", False):
                     if dereverb_speech_ref is None:
@@ -512,21 +660,31 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                             )
                     else:
                         # compute on spectrum
-                        tf_ref = [self.encoder(sr, speech_lengths)[0] for sr in sref]
+                        tf_ref = [
+                            self.encoder(sr, speech_lengths)[0] for sr in sref
+                        ]
                         # for models like SVoice that output multiple lists of
                         # separated signals
                         pre_is_multi_list = isinstance(spre[0], (list, tuple))
                         if pre_is_multi_list:
                             tf_pre = [
-                                [self.encoder(sp, speech_lengths)[0] for sp in ps]
+                                [
+                                    self.encoder(sp, speech_lengths)[0]
+                                    for sp in ps
+                                ]
                                 for ps in spre
                             ]
                         else:
-                            tf_pre = [self.encoder(sp, speech_lengths)[0] for sp in spre]
+                            tf_pre = [
+                                self.encoder(sp, speech_lengths)[0]
+                                for sp in spre
+                            ]
 
                     l, s, o = loss_wrapper(tf_ref, tf_pre, {**others, **o})
                 else:
-                    raise NotImplementedError("Unsupported loss type: %s" % str(criterion))
+                    raise NotImplementedError(
+                        "Unsupported loss type: %s" % str(criterion)
+                    )
 
                 loss += l * loss_wrapper.weight
                 stats.update(s)
@@ -543,19 +701,59 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
             # compute EDA counting loss
             if "existance_probability" in others:
                 with torch.cuda.amp.autocast(enabled=False):
-                    others["existance_probability"] = others["existance_probability"].to(torch.float32)
+                    others["existance_probability"] = others[
+                        "existance_probability"
+                    ].to(torch.float32)
                     bce = torch.nn.BCELoss(reduction="none")
                     # bce = torch.nn.BCEWithLogitsLoss(reduction="none")
-                    exist, non_exist = others["existance_probability"][..., :num_spk], others["existance_probability"][..., num_spk]
-                    bce_loss_exist = bce(exist, torch.ones_like(exist)).sum(dim=-1)
-                    bce_loss_non_exist = bce(non_exist, torch.zeros_like(non_exist))
-                    bce_loss = ((bce_loss_exist + bce_loss_non_exist) / (num_spk + 1)).mean()
+                    exist, non_exist = (
+                        others["existance_probability"][..., :num_spk],
+                        others["existance_probability"][..., num_spk],
+                    )
+                    bce_loss_exist = bce(exist, torch.ones_like(exist)).sum(
+                        dim=-1
+                    )
+                    bce_loss_non_exist = bce(
+                        non_exist, torch.zeros_like(non_exist)
+                    )
+                    bce_loss = (
+                        (bce_loss_exist + bce_loss_non_exist) / (num_spk + 1)
+                    ).mean()
                     loss += 1 * bce_loss
                     stats["attractor_loss"] = bce_loss.detach()
-                    stats["attractor_loss_exist"] = bce_loss_exist.mean().detach()
-                    stats["attractor_loss_nonexist"] = bce_loss_non_exist.mean().detach()
-                    stats["attractor_exist_prob"] = others["existance_probability"][..., :num_spk].mean().detach()
-                    stats["attractor_nonexist_prob"] = others["existance_probability"][..., num_spk].mean().detach()
+                    stats[
+                        "attractor_loss_exist"
+                    ] = bce_loss_exist.mean().detach()
+                    stats[
+                        "attractor_loss_nonexist"
+                    ] = bce_loss_non_exist.mean().detach()
+                    stats["attractor_exist_prob"] = (
+                        others["existance_probability"][..., :num_spk]
+                        .mean()
+                        .detach()
+                    )
+                    stats["attractor_nonexist_prob"] = (
+                        others["existance_probability"][..., num_spk]
+                        .mean()
+                        .detach()
+                    )
+            # compute multi-decoder speaker counting loss
+            if "spkest_probability" in others:
+                bce = torch.nn.BCELoss(reduction="none")
+                with torch.cuda.amp.autocast(enabled=False):
+                    est = others[
+                        "spkest_probability"
+                    ].to(torch.float32)
+                    idx = self.extractor.num_spk_list.index(num_spk)
+                    ref = torch.nn.functional.one_hot(
+                        torch.tensor([idx]),
+                        num_classes=est.shape[-1]
+                    ).tile((est.shape[0], 1)).to(torch.float32).to(est.device)
+                    # print(num_spk, est, ref, flush=True)
+                    bce_loss = bce(est, ref).mean()
+                    loss = loss + bce_loss
+                    stats["bce_loss"] = bce_loss.detach()
+                    stats[f"{num_spk}-spk probability"] = est[:, idx].detach().mean()
 
         if self.training and isinstance(loss, float):
             raise AttributeError(
@@ -565,7 +763,9 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
 
         # force_gatherable: to-device and to-tensor if scalar for DataParallel
         batch_size = speech_ref[0].shape[0]
-        loss, stats, weight = force_gatherable((loss, stats, batch_size), loss.device)
+        loss, stats, weight = force_gatherable(
+            (loss, stats, batch_size), loss.device
+        )
         return loss, stats, weight, perm
 
     def _align_ref_pre_channels(self, ref, pre, ch_dim=2, force_1ch=False):
@@ -590,7 +790,9 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                     for p in plist
                 ]
             else:
-                pre = [p.index_select(ch_dim, index).squeeze(ch_dim) for p in pre]
+                pre = [
+                    p.index_select(ch_dim, index).squeeze(ch_dim) for p in pre
+                ]
         elif ref[0].dim() == pre_dim == 3 and force_1ch:
             # multi-channel reference and output
             ref = [r.index_select(ch_dim, index).squeeze(ch_dim) for r in ref]
@@ -601,11 +803,20 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
                     for p in plist
                 ]
             else:
-                pre = [p.index_select(ch_dim, index).squeeze(ch_dim) for p in pre]
+                pre = [
+                    p.index_select(ch_dim, index).squeeze(ch_dim) for p in pre
+                ]
         return ref, pre
 
     def _get_speech_masks(
-        self, criterion, feature_mix, noise_ref, speech_ref, speech_pre, ilens, others
+        self,
+        criterion,
+        feature_mix,
+        noise_ref,
+        speech_ref,
+        speech_pre,
+        ilens,
+        others,
     ):
         if noise_ref is not None:
             noise_spec = self.encoder(sum(noise_ref), ilens)[0]
@@ -618,7 +829,8 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         )
         if "mask_spk1" in others:
             masks_pre = [
-                others["mask_spk{}".format(spk + 1)] for spk in range(self.num_spk)
+                others["mask_spk{}".format(spk + 1)]
+                for spk in range(self.num_spk)
             ]
         else:
             masks_pre = criterion.create_mask_label(
@@ -629,7 +841,10 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
         return masks_ref, masks_pre
 
     def collect_feats(
-        self, speech_mix: torch.Tensor, speech_mix_lengths: torch.Tensor, **kwargs
+        self,
+        speech_mix: torch.Tensor,
+        speech_mix_lengths: torch.Tensor,
+        **kwargs,
     ) -> Dict[str, torch.Tensor]:
         # for data-parallel
         speech_mix = speech_mix[:, : speech_mix_lengths.max()]

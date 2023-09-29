@@ -13,9 +13,6 @@ import torch
 import yaml
 from typeguard import check_argument_types
 
-from espnet2.enh.loss.criterions.tf_domain import FrequencyDomainMSE
-from espnet2.enh.loss.criterions.time_domain import SISNRLoss
-from espnet2.enh.loss.wrappers.pit_solver import PITSolver
 from espnet2.fileio.sound_scp import SoundScpWriter
 from espnet2.fileio.datadir_writer import DatadirWriter
 from espnet2.tasks.enh_tse_ss import (
@@ -28,9 +25,6 @@ from espnet2.utils import config_argparse
 from espnet2.utils.types import str2bool, str2triple_str, str_or_none
 from espnet.utils.cli_utils import get_commandline_args
 
-import fast_bss_eval
-
-si_snr_loss = SISNRLoss()
 EPS = torch.finfo(torch.get_default_dtype()).eps
 
 
@@ -87,59 +81,23 @@ def build_model_from_args_and_file(task, args, model_file, device):
     return model
 
 
-def compensate_under_estimation(ref, inf, perm):
-    true_num_spk = ref.shape[0]
-    perm = perm.numpy()
-
-    copies = []
-    for i in range(true_num_spk):
-        if i in perm:
-            idx = np.where(perm == i)[0]
-            copies.append(inf[[idx]])
-        else:
-            _, perm2 = fast_bss_eval.sdr(ref[[i]], inf, return_perm=True)
-            copies.append(inf[perm2])
-    inf = torch.cat(copies, dim=0)
-    assert inf.shape == ref.shape, "something wrong"
-    return inf
-
-
-def select_sources(ref, inf, mix, writer, max_num_spk, key):
-    true_num_spk = len(ref)
-    ref = torch.cat(ref, dim=0)
+def select_sources(inf, writer, max_num_spk, key):
     est_num_spk = len(inf)
-    inf = torch.cat(inf, dim=0).to(ref.device)
+    inf = torch.cat(inf, dim=0)
     # a. compensate when under-separation happens
-    if est_num_spk < true_num_spk:
-        ## zero padding
-        # zero = torch.zeros((true_num_spk - est_num_spk, inf.shape[-1]), dtype=inf.dtype) + 1e-5
-        # inf = torch.cat((inf, zero), dim=0)
-        ## residual
-        # residual = mix - inf.sum(dim=0)
-        # residual = torch.tile(residual, [true_num_spk - est_num_spk, 1])
-        # inf = torch.cat((inf, residual), dim=0)
-        ## copy
+    if est_num_spk < max_num_spk:
+        # zero padding
+        zero = torch.zeros((max_num_spk - est_num_spk, inf.shape[-1]), dtype=inf.dtype, device=inf.device) + 1e-5
+        inf = torch.cat((inf, zero), dim=0)
         logging.info(
-            f"Under-separation (Est: {est_num_spk}, Ref: {true_num_spk}). Compensate unestimated speaker using resudual"
+            f"Zero-padded (Est: {est_num_spk}, Max: {max_num_spk})"
         )
     # b. logging when over-estimation happens (discard sources in c.)
-    elif est_num_spk > true_num_spk:
+    elif est_num_spk > max_num_spk:
         logging.info(
-            f"Over-separation (Est: {est_num_spk}, Ref: {true_num_spk}). Discard over-separated sources"
+            f"Over-separation (Est: {est_num_spk}, Max: {max_num_spk}). Discard over-separated sources"
         )
-    # c. solve permutation and discard over-estimated source
-    sdr, perm = fast_bss_eval.sdr(ref, inf, return_perm=True)
 
-    # next, compensate under-estimated sources
-    if est_num_spk < true_num_spk:
-        inf = compensate_under_estimation(ref, inf, perm)
-        sdr2, perm = fast_bss_eval.sdr(ref, inf, return_perm=True)
-        print(sdr, sdr2, perm, flush=True)
-    # here, over-separated sources are discarded
-    else:
-        inf = inf[perm]
-
-    assert ref.shape == inf.shape, f"{ref.shape}, {inf.shape}"
     writer["Est_num_spk"][key] = str(est_num_spk)
 
     assert (
@@ -172,7 +130,6 @@ class SeparateSpeech:
         show_progressbar: bool = False,
         ref_channel: Optional[int] = None,
         normalize_output_wav: bool = False,
-        use_true_nspk: bool = False,
         device: str = "cpu",
         dtype: str = "float32",
     ):
@@ -249,15 +206,11 @@ class SeparateSpeech:
 
         self.segmenting = segment_size is not None and hop_size is not None
 
-        self.use_true_nspk = (
-            use_true_nspk  # if true, number of speakers are informed to model
-        )
-
     @torch.no_grad()
     def __call__(
         self,
         speech_mix: Union[torch.Tensor, np.ndarray],
-        fs: int = 8000,
+        fs: int = 16000,
         num_spk: int = None,
     ) -> List[torch.Tensor]:
         """Inference
@@ -292,14 +245,18 @@ class SeparateSpeech:
         speech_mix, mean, std = normalization(speech_mix)
 
         # b. Separation
-        if self.use_true_nspk:
-            assert num_spk is not None, "num_spk must be specified"
-        else:
-            num_spk = None
         feats, f_lens = self.enh_model.encoder(speech_mix, lengths)
-        feats, _, others = self.enh_model.extractor(
-            feats, f_lens, num_spk=num_spk
-        )
+        if self.device != "cpu":
+            with torch.autocast(device_type=self.device, dtype=torch.float16, enabled=True):
+                feats, _, others = self.enh_model.extractor(
+                    feats, f_lens, num_spk=None
+                )
+        else:
+            feats, _, others = self.enh_model.extractor(
+                feats, f_lens, num_spk=None
+            )
+        if feats[0].dtype == torch.complex32:
+            feats = [f.to(torch.complex64) for f in feats]
         waves = [self.enh_model.decoder(f, lengths)[0] for f in feats]
 
         if self.normalize_output_wav:
@@ -311,28 +268,6 @@ class SeparateSpeech:
             waves = [w for w in waves]
 
         return waves
-
-    @torch.no_grad()
-    def cal_permumation(self, ref_wavs, enh_wavs, criterion="si_snr"):
-        """Calculate the permutation between seaprated streams in two adjacent segments.
-
-        Args:
-            ref_wavs (List[torch.Tensor]): [(Batch, Nsamples)]
-            enh_wavs (List[torch.Tensor]): [(Batch, Nsamples)]
-            criterion (str): one of ("si_snr", "mse", "corr)
-        Returns:
-            perm (torch.Tensor): permutation for enh_wavs (Batch, num_spk)
-        """
-
-        criterion_class = {"si_snr": SISNRLoss, "mse": FrequencyDomainMSE}[
-            criterion
-        ]
-
-        pit_solver = PITSolver(criterion=criterion_class())
-
-        _, _, others = pit_solver(ref_wavs, enh_wavs)
-        perm = others["perm"]
-        return perm
 
     @staticmethod
     def from_pretrained(
@@ -392,7 +327,6 @@ def inference(
     segment_size: Optional[float],
     hop_size: Optional[float],
     normalize_segment_scale: bool,
-    use_true_nspk: bool,
     show_progressbar: bool,
     ref_channel: Optional[int],
     normalize_output_wav: bool,
@@ -427,7 +361,6 @@ def inference(
         show_progressbar=show_progressbar,
         ref_channel=ref_channel,
         normalize_output_wav=normalize_output_wav,
-        use_true_nspk=use_true_nspk,
         device=device,
         dtype=dtype,
     )
@@ -502,9 +435,7 @@ def inference(
             # separation
             waves = separate_speech(**batch, fs=fs, num_spk=num_spk)
             waves = select_sources(
-                ref,
                 waves,
-                batch["speech_mix"],
                 score_writer,
                 max_num_spk,
                 keys[0],
@@ -554,7 +485,7 @@ def get_parser():
         help="Data type",
     )
     parser.add_argument(
-        "--fs", type=humanfriendly_or_none, default=8000, help="Sampling rate"
+        "--fs", type=humanfriendly_or_none, default=16000, help="Sampling rate"
     )
     parser.add_argument(
         "--num_workers",
@@ -611,12 +542,6 @@ def get_parser():
         "--max_num_spk",
         type=int,
         help="maximum number of speakers",
-    )
-    group.add_argument(
-        "--use_true_nspk",
-        type=str2bool,
-        default=False,
-        help="Whether to inform true number of speakers to model",
     )
 
     group = parser.add_argument_group("Data loading related")
