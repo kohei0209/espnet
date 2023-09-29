@@ -81,6 +81,7 @@ def build_batch_sampler(
     fold_lengths: Sequence[int] = (),
     padding: bool = True,
     utt2category_file: str = None,
+    remove_samples_with_speaker_overlap: bool = False,
 ) -> AbsSampler:
     """Helper function to instantiate BatchSampler.
 
@@ -132,6 +133,7 @@ def build_batch_sampler(
             drop_last=drop_last,
             min_batch_size=min_batch_size,
             utt2category_file=utt2category_file,
+            remove_samples_with_speaker_overlap=remove_samples_with_speaker_overlap,
         )
 
     elif type == "numel":

@@ -17,6 +17,7 @@ class FoldedBatchSampler(AbsSampler):
         sort_batch: str = "ascending",
         drop_last: bool = False,
         utt2category_file: str = None,
+        remove_samples_with_speaker_overlap: bool = False,
     ):
         assert check_argument_types()
         assert batch_size > 0
@@ -39,7 +40,8 @@ class FoldedBatchSampler(AbsSampler):
         #    uttA 100,...
         #    uttB 201,...
         utt2shapes = [
-            load_num_sequence_text(s, loader_type="csv_int") for s in shape_files
+            load_num_sequence_text(s, loader_type="csv_int")
+            for s in shape_files
         ]
 
         first_utt2shape = utt2shapes[0]
@@ -54,22 +56,25 @@ class FoldedBatchSampler(AbsSampler):
         keys = sorted(first_utt2shape, key=lambda k: first_utt2shape[k][0])
 
         ######
-        # remove mixtures with duplication
+        # remove mixtures with speaker overlap
         ######
-        def has_speaker_duplicates(lst):
-            # no duplicates if lst has only one compoenent
-            if len(lst) <= 1:
-                return False
-            # remove duplication by changing into set
-            unique_set = set(lst)
-            # if length is different, there was duplication
-            return len(lst) != len(unique_set)
-        new_keys = []
-        for k in keys:
-            spk_ids = k.split("_")[1:(int(k[0]) + 1)]
-            if not has_speaker_duplicates(spk_ids):
-                new_keys.append(k)
-        keys = new_keys
+        if remove_samples_with_speaker_overlap:
+
+            def has_speaker_duplicates(lst):
+                # no duplicates if lst has only one compoenent
+                if len(lst) <= 1:
+                    return False
+                # remove duplication by changing into set
+                unique_set = set(lst)
+                # if length is different, there was duplication
+                return len(lst) != len(unique_set)
+
+            new_keys = []
+            for k in keys:
+                spk_ids = k.split("_")[1 : (int(k[0]) + 1)]
+                if not has_speaker_duplicates(spk_ids):
+                    new_keys.append(k)
+            keys = new_keys
 
         if len(keys) == 0:
             raise RuntimeError(f"0 lines found: {shape_files[0]}")
@@ -95,7 +100,9 @@ class FoldedBatchSampler(AbsSampler):
             batch_sizes = []
             while True:
                 k = category_keys[start]
-                factor = max(int(d[k][0] / m) for d, m in zip(utt2shapes, fold_lengths))
+                factor = max(
+                    int(d[k][0] / m) for d, m in zip(utt2shapes, fold_lengths)
+                )
                 bs = max(min_batch_size, int(batch_size / (1 + factor)))
                 if self.drop_last and start + bs > len(category_keys):
                     # This if-block avoids 0-batches
