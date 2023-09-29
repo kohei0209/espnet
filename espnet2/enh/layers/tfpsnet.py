@@ -400,12 +400,15 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
         norm_type="gLN",
         # EDA-related arguments
         i_eda_layer=4,
+        hidden_size_after_eda=None,
         num_eda_modules=1,
         sep_algo="multiply",
         memory_efficient_inference=True,
+        checkpointing=False,
         # TSE-related arguments
         i_adapt_layer=4,
         num_aux_tfps_blocks=1,
+        cond_tfps_blocks=None,
         adapt_layer_type="tfattn",
         adapt_enroll_dim=64,
         adapt_attention_dim=512,
@@ -417,6 +420,7 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
             bottleneck_size,
             output_size,
             tfps_blocks,
+            # tfps_blocks[:i_eda_layer + 1],
             SingleTransformer,
             rnn_type,
             bottleneck_size,
@@ -427,7 +431,28 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
             bidirectional=bidirectional,
             norm=norm_type,
         )
-        self.hidden_size = hidden_size
+
+        # if hidden_size_after_eda is not None:
+        #     hidden_size = hidden_size_after_eda
+        # for block in tfps_blocks[i_eda_layer + 1:]:
+        #     if block == 1:
+        #         self.tfps_blocks.append(
+        #             TFPSBlockType1(
+        #                 SingleTransformer,
+        #                 rnn_type,
+        #                 bottleneck_size,
+        #                 att_heads,
+        #                 hidden_size,
+        #                 dropout=dropout,
+        #                 activation=activation,
+        #                 bidirectional=bidirectional,
+        #                 norm=norm_type,
+        #             )
+        #         )
+        #     else:
+        #         raise ValueError(
+        #             f"TFPSBlock type ({block}) must be either 1 or 2"
+        #         )
 
         # eda related params
         self.i_eda_layer = i_eda_layer
@@ -435,6 +460,7 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
             self.sequence_aggregation = SequenceAggregation(bottleneck_size)
             self.eda = EncoderDecoderAttractor(bottleneck_size)
             self.memory_efficient_inference = memory_efficient_inference
+            self.checkpointing = checkpointing
             # define how to use attractor
             assert sep_algo in ["gating", "multiply"]
             self.sep_algo = sep_algo
@@ -503,13 +529,13 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
             else:
                 raise NotImplementedError()
             # initialize additional processing block
-            if "improved" in self.adapt_layer_type:
+            if cond_tfps_blocks is not None:
                 self.conditional_model = Conditional_TFPSNet_Transformer(
                     bottleneck_size,
                     adapt_hidden_dim,
                     bottleneck_size,
                     output_size,
-                    (1,),
+                    cond_tfps_blocks,
                     SingleTransformer,
                     rnn_type,
                     bottleneck_size,
@@ -520,7 +546,8 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
                     bidirectional=bidirectional,
                     norm=norm_type,
                 )
-                adapt_layer_type = adapt_layer_type.replace("_improved", "")
+            else:
+                self.conditional_model = None
             # load speaker selection module
             self.adapt_layer = make_adapt_layer(
                 adapt_layer_type,
@@ -530,8 +557,14 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
                 adapt_layer_kwargs=adapt_layer_params,
             )
 
-    def forward(self, input, enroll_emb, num_spk=None):
-        is_tse = enroll_emb is not None
+    def forward(self, input, enroll_emb, num_spk=None, task=None):
+        if task is None and enroll_emb is None:
+            task = "enh"
+        elif task is None and enroll_emb is not None:
+            task = "tse"
+        assert task in ["enh", "tse", "enh_tse"]
+
+        # is_tse = enroll_emb is not None
         B, N, F, T = input.shape
         output = self.layer_norm(input.reshape(B, N, -1))
         output = self.bottleneck_conv1x1(output).reshape(
@@ -541,7 +574,17 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
             if isinstance(block, TFPSBlockType2):
                 output = block(output, apply_attn_mask=True)
             else:
+                # checkpointing during training
                 if (
+                    block.training
+                    and self.checkpointing
+                    and i > self.i_eda_layer
+                ):
+                    output = torch.utils.checkpoint.checkpoint(
+                        block, output,
+                    )
+                # memory efficient inference
+                elif (
                     not block.training
                     and self.memory_efficient_inference
                     and i > self.i_eda_layer
@@ -549,6 +592,7 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
                     torch.cuda.empty_cache()
                     for o in range(output.shape[0]):
                         output[o] = block(output[[o]])[0]
+                # usual forward pass
                 else:
                     output = block(output)
 
@@ -559,8 +603,15 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
                 )
 
             # target speaker extraction part
-            if i == self.i_adapt_layer and is_tse:
+            if i == self.i_adapt_layer and task == "tse":
                 output = self.tse_module(output, enroll_emb)
+            elif i == self.i_adapt_layer and task == "enh_tse":
+                tse_output = self.tse_module(output, enroll_emb)
+                H = output.shape[-3]
+                output = output.reshape(B, -1, H, F, T)
+                tse_output = tse_output.unsqueeze(dim=1)
+                output = torch.cat((output, tse_output), dim=1)
+                output = output.reshape(-1, H, F, T)
 
         if self.i_eda_layer is None:
             probabilities = None
@@ -621,7 +672,7 @@ class TFPSNet_Transformer_EDA(TFPSNet_Base):
         output = self.adapt_layer(output, enroll_emb)
 
         # additional enhancement layers
-        if "improved" in self.adapt_layer_type:
+        if self.conditional_model is not None:
             output = self.conditional_model(
                 output, enroll_emb.mean(dim=-1, keepdim=True)
             )

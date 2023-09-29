@@ -1,5 +1,5 @@
 from collections import OrderedDict
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List, Tuple, Union
 
 import torch
 from packaging.version import parse as V
@@ -132,6 +132,7 @@ class DPTNetEDAExtractor(AbsExtractor, AbsSeparator):
         ilens_aux: torch.Tensor = None,
         suffix_tag: str = "",
         num_spk: int = None,
+        task: str = None,
     ) -> Tuple[List[Union[torch.Tensor, ComplexTensor]], torch.Tensor, OrderedDict]:
         """Forward.
 
