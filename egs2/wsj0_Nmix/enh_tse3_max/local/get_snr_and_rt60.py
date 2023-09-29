@@ -10,13 +10,16 @@ import math
 import json
 import copy
 import pyroomacoustics as pra
+
 FS_ORIG = 16000
 
+
 def SNR(speech, noise):
-    speech_power = ((speech)**2).sum()
-    noise_power = ((noise)**2).sum()
-    snr = 10*np.log10(speech_power/noise_power)
+    speech_power = ((speech) ** 2).sum()
+    noise_power = ((noise) ** 2).sum()
+    snr = 10 * np.log10(speech_power / noise_power)
     return snr
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--metadata_path", type=Path)
@@ -45,7 +48,9 @@ for i, (key, data) in enumerate(tqdm(metadata.items())):
     rt60_list = []
     for rir_path in rir_paths:
         rir, fs = sf.read(rir_path, dtype="float32")
-        rt60 = pra.experimental.measure_rt60(rir, fs=fs, plot=False, decay_db=args.decay_db)
+        rt60 = pra.experimental.measure_rt60(
+            rir, fs=fs, plot=False, decay_db=args.decay_db
+        )
         rt60_list.append(rt60)
     new_metadata[key]["measured_rt60"] = rt60_list
 

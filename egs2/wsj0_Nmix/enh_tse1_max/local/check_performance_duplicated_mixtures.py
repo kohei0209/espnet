@@ -17,7 +17,9 @@ def has_speaker_duplicates(lst):
 
 
 if __name__ == "__main__":
-    data_root = Path("exp/enh_tse_dptnet_eda4thlayer_2-5mix_1bce_sisnr_enhanced_spkselect_raw/enhanced_tt_min_8k/tse/")
+    data_root = Path(
+        "exp/enh_tse_dptnet_eda4thlayer_2-5mix_1bce_sisnr_enhanced_spkselect_raw/enhanced_tt_min_8k/tse/"
+    )
     n_mix = [4, 5]
     results = {}
 
@@ -37,7 +39,7 @@ if __name__ == "__main__":
                 score_tmp += float(scores[n][key])
             score_tmp /= nspk
             # get speaker ids
-            spk_ids = key.split("_")[1:(nspk + 1)]
+            spk_ids = key.split("_")[1 : (nspk + 1)]
             # check whether there is a speaker duplication
             has_duplicate = has_speaker_duplicates(spk_ids)
 
@@ -47,9 +49,16 @@ if __name__ == "__main__":
                 results[nspk]["without_duplication"].append(score_tmp)
         # average
         # print(len(results[nspk]["with_duplication"]), len(results[nspk]["without_duplication"]))
-        results[nspk]["all"] = results[nspk]["with_duplication"] + results[nspk]["without_duplication"]
-        results[nspk]["with_duplication"] = mean(results[nspk]["with_duplication"])
-        results[nspk]["without_duplication"] = mean(results[nspk]["without_duplication"])
+        results[nspk]["all"] = (
+            results[nspk]["with_duplication"]
+            + results[nspk]["without_duplication"]
+        )
+        results[nspk]["with_duplication"] = mean(
+            results[nspk]["with_duplication"]
+        )
+        results[nspk]["without_duplication"] = mean(
+            results[nspk]["without_duplication"]
+        )
         results[nspk]["all"] = mean(results[nspk]["all"])
 
     pprint.pprint(results)

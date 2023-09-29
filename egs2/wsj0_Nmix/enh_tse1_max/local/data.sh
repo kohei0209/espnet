@@ -32,7 +32,7 @@ nlsyms=data/nlsyms.txt
 min_or_max=min
 sample_rate=8k
 
-stage=3
+stage=0
 stop_stage=100
 
 . utils/parse_options.sh
@@ -59,9 +59,9 @@ recog_set="tt_"${min_or_max}_${sample_rate}
 if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
     log "stage 0: Prepare simulation scripts and convert WSJ0 to wav"
     echo "Downloading WSJ0_mixture scripts."
-    mkdir -p ${wsj_mix_scripts}
 
     if [ ! -e ${wsj_mix_scripts} ]; then
+        mkdir -p ${wsj_mix_scripts}
         git clone https://github.com/mpariente/pywsj0-mix.git ${wsj_mix_scripts}
         cp local/create_wsj_scp.py ${wsj_mix_scripts}
 

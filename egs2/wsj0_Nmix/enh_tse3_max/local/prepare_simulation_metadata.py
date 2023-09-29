@@ -19,6 +19,7 @@ np.random.seed(0)
 #     "room_size": [[5., 10.], [5., 10.], [3., 4.],],
 # }
 
+len_mode = "min"
 categories = ["1mix", "2mix", "3mix", "4mix", "5mix"]
 
 parser = argparse.ArgumentParser()
@@ -26,7 +27,7 @@ parser.add_argument("--wav_scp_folder", default="wsj0-mix", type=Path)
 parser.add_argument("--wham_folder", default="wsj0-mix", type=Path)
 parser.add_argument("--wav_output_folder", default="wsj0-mix", type=Path)
 parser.add_argument("--simulation_config_path", type=Path)
-parser.add_argument("--len_mode", type=str, default="min")
+# parser.add_argument("--scp_output_folder", default="wsj0-mix", type=Path)
 parser.add_argument("-sr", "--samplerate", default=8000, type=int)
 args = parser.parse_args()
 
@@ -46,7 +47,6 @@ def check_distance(pos_target, pos_others, thres_distance=0.5):
     return flag
 
 samplerate_str = str(args.samplerate // 1000) + "k"
-len_mode = args.len_mode
 with open(args.simulation_config_path, "r") as f:
     config = json.load(f)
 print(config)
@@ -62,7 +62,7 @@ print(config)
 #             (base_dir / f"rir_s{n+1}").mkdir(exist_ok=True)
 
 
-for cond in ["tt"]:
+for cond in ["tr"]:
     # speech related
     scp_path = args.wav_scp_folder / f"{cond}_{len_mode}_{samplerate_str}"
     mix_scp = read_2columns_text(scp_path / "wav.scp")
