@@ -455,6 +455,8 @@ class ESPnetExtractionEnhancementModel(AbsESPnetModel):
             num_spk=num_spk,
             task=task,
         )
+        if task == "tse":
+            feature_pre = [feature_pre]
 
         if feature_pre is not None:
             with torch.cuda.amp.autocast(enabled=False):

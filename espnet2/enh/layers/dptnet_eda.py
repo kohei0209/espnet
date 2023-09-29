@@ -1,23 +1,12 @@
-# The implementation of DPTNet proposed in
-# J. Chen, Q. Mao, and D. Liu, “Dual-path transformer network:
-# Direct context-aware modeling for end-to-end monaural speech
-# separation,” in Proc. ISCA Interspeech, 2020, pp. 2642–2646.
-#
-# Ported from https://github.com/ujscjj/DPTNet
+# The implementation of DPTNet-based MUSE model proposed in
+# ***, in Proc. IEEE ASRU 2023.
 
 import torch
 import torch.nn as nn
 import statistics
 
-from espnet2.enh.layers.tcn import choose_norm
-from espnet.nets.pytorch_backend.nets_utils import get_activation
 from espnet2.enh.layers.dptnet import ImprovedTransformerLayer
-
 from espnet2.enh.layers.adapt_layers import make_adapt_layer
-from espnet2.enh.layers.dprnn_eda import (
-    SequenceAggregation,
-    EncoderDecoderAttractor,
-)
 
 
 class DPTNet_EDA_Informed(nn.Module):
@@ -53,7 +42,6 @@ class DPTNet_EDA_Informed(nn.Module):
         i_eda_layer=4,
         num_eda_modules=1,
         i_adapt_layer=4,
-        triple_path=True,
         adapt_layer_type="attn",
         adapt_enroll_dim=64,
         adapt_attention_dim=512,
@@ -68,7 +56,6 @@ class DPTNet_EDA_Informed(nn.Module):
         self.output_size = input_size
 
         # dual-path transformer
-        self.triple_path = triple_path
         self.row_transformer = nn.ModuleList()
         self.col_transformer = nn.ModuleList()
         self.chan_transformer = nn.ModuleList()
@@ -97,20 +84,6 @@ class DPTNet_EDA_Informed(nn.Module):
                     norm=norm_type,
                 )
             )
-        if triple_path:
-            for i in range(num_layers - i_eda_layer - 1):
-                self.chan_transformer.append(
-                    ImprovedTransformerLayer(
-                        rnn_type,
-                        input_size,
-                        att_heads,
-                        hidden_size,
-                        dropout=dropout,
-                        activation=activation,
-                        bidirectional=True,
-                        norm=norm_type,
-                    )
-                )
 
         # output layer
         self.output = nn.Sequential(
@@ -202,12 +175,6 @@ class DPTNet_EDA_Informed(nn.Module):
                 # output, probabilities = self.eda_process(output, num_spk)
                 output = output.view(-1, hidden_dim, dim1, dim2)
                 batch = output.shape[0]
-
-            # triple-path block
-            if self.triple_path and i > self.i_eda_layer:
-                output = self.channel_chunk_process(
-                    output, i - self.i_eda_layer - 1, org_batch
-                )
 
             # target speaker extraction part
             if i == self.i_adapt_layer and is_tse:
@@ -443,3 +410,80 @@ class FiLM(nn.Module):
         if self.skip_connection:
             output = output + input
         return output
+
+
+class SequenceAggregation(nn.Module):
+    def __init__(
+        self,
+        hidden_size,
+        r=4,
+    ):
+        super(SequenceAggregation, self).__init__()
+        self.path1 = nn.Sequential(
+            nn.Linear(hidden_size, r * hidden_size),
+            nn.Tanh(),
+            nn.Linear(r * hidden_size, r),
+            nn.Softmax(dim=-1),
+        )
+        self.linear = nn.Linear(hidden_size, hidden_size // r)
+
+    def forward(self, input):
+        batch_size, num_segments, segment_size, hidden_size = input.shape
+        alpha = self.path1(input)
+        W = torch.matmul(alpha.transpose(-1, -2), self.linear(input)).reshape(batch_size, num_segments, hidden_size)
+        return W
+
+
+class EncoderDecoderAttractor(nn.Module):
+    def __init__(
+        self,
+        hidden_size,
+    ):
+        super(EncoderDecoderAttractor, self).__init__()
+        self.lstm_encoder = nn.LSTM(
+            hidden_size, hidden_size,
+            num_layers=1,
+            dropout=0,
+            bidirectional=False,
+            batch_first=True,
+        )
+        self.lstm_decoder = nn.LSTM(
+            hidden_size, hidden_size,
+            num_layers=1,
+            dropout=0,
+            bidirectional=False,
+            batch_first=True,
+        )
+
+        self.attractor_existence_estimator = nn.Sequential(
+            nn.Linear(hidden_size, 1), nn.Sigmoid()
+        )
+
+    def forward(self, input, num_spk=None):
+        batch_size, C, H = input.shape
+        output = input
+        # if self.lstm_encoder.training:
+        output = output[..., torch.randperm(C), :]  # shuffle chunk order
+        _, state = self.lstm_encoder(output)
+        zero_input = input.new_zeros((batch_size, 1, H))
+        outputs, existence_probabilities = [], []
+        # estimate the number of speakers (inference)
+        if num_spk is None:
+            assert batch_size == 1, "We don't support batched computation in inference"
+            existence_probability = 1
+            while existence_probability > 0.5:
+                output, state = self.lstm_decoder(zero_input, state)
+                existence_probability = self.attractor_existence_estimator(output)
+                existence_probabilities.append(existence_probability[..., 0])
+                outputs.append(output[..., 0, :])
+        # number of speakers is given (training)
+        else:
+            for j in range(num_spk + 1):
+                output, state = self.lstm_decoder(zero_input, state)  # (batch, 1, hidden)
+                output = output[..., 0, :]
+                outputs.append(output)
+                existence_probability = self.attractor_existence_estimator(output)
+                existence_probabilities.append(existence_probability[..., 0])
+        outputs = torch.stack(outputs, dim=1)  # [B, J, H]
+        existence_probabilities = torch.stack(existence_probabilities, dim=1)  # [B, J]
+        return outputs, existence_probabilities

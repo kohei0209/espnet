@@ -35,7 +35,6 @@ class DPTNetEDAExtractor(AbsExtractor, AbsSeparator):
         # eda realted arguments
         i_eda_layer: int = 1,
         num_eda_modules: int = 1,
-        triple_path: bool = True,
         # enrollment related arguments
         i_adapt_layer: int = 1,
         adapt_layer_type: str = "mul",
@@ -81,7 +80,6 @@ class DPTNetEDAExtractor(AbsExtractor, AbsSeparator):
             num_layers=layer,
             bidirectional=bidirectional,
             norm_type=norm_type,
-            triple_path=triple_path,
             i_eda_layer=i_eda_layer,
             num_eda_modules=num_eda_modules,
             i_adapt_layer=i_adapt_layer,

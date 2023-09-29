@@ -12,14 +12,7 @@ from espnet2.enh.extractor.abs_extractor import AbsExtractor
 from espnet2.enh.extractor.td_speakerbeam_extractor import (
     TDSpeakerBeamExtractor,
 )
-from espnet2.enh.extractor.td_speakerbeam_hybrid_extractor import (
-    TDSpeakerBeamExtractorWithAttention,
-)
-from espnet2.enh.extractor.td_dprnn_eda_extractor import DPRNNEDAExtractor
-from espnet2.enh.extractor.sepformer_extractor import SepformerEDAExtractor
 from espnet2.enh.extractor.dptnet_eda_extractor import DPTNetEDAExtractor
-from espnet2.enh.extractor.tfpsnet_eda_extractor import TFPSNetEDAExtractor, MultiDecoderTFPSNetExtractor
-from espnet2.enh.extractor.asenet import ASENet
 from espnet2.tasks.abs_task import AbsTask
 from espnet2.tasks.enh import (
     criterion_choices,
@@ -56,13 +49,7 @@ extractor_choices = ClassChoices(
     name="extractor",
     classes=dict(
         td_speakerbeam=TDSpeakerBeamExtractor,
-        td_speakerbeam_with_attention=TDSpeakerBeamExtractorWithAttention,
-        td_dprnn_eda=DPRNNEDAExtractor,
-        asenet=ASENet,
-        sepformer_eda=SepformerEDAExtractor,
         dptnet_eda=DPTNetEDAExtractor,
-        tfpsnet_eda=TFPSNetEDAExtractor,
-        tfpsnet_multidecoder=MultiDecoderTFPSNetExtractor,
     ),
     type_check=AbsExtractor,
     default="td_speakerbeam",
@@ -265,12 +252,6 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             type=str2bool,
             default=False,
             help="Whether to remove data with speaker overlap (for WSJ0_Nmix)",
-        )
-        group.add_argument(
-            "--batch_size_nmix",
-            type=list,
-            default=None,
-            help="Batch size for n_mix (for WSJ0_Nmix)",
         )
 
         for class_choices in cls.class_choices_list:
@@ -535,27 +516,6 @@ class TargetSpeakerExtractionAndEnhancementTask(AbsTask):
             logging.info(
                 f"Original batches: {num_batches_before}, Current batches: {num_batches_after}"
             )
-
-        # variable batch size
-        if args.batch_size_nmix is not None and mode != "plot_att":
-            # batch_sizes = [4, 3, 2, 2, 1]
-            new_batches = []
-            b = 0
-            while True:
-                batch_size = args.batch_size_nmix[int(batches[b][0][0]) - 1]
-                batch = tuple()
-                for _ in range(batch_size):
-                    # make batch with the same N for N-mix
-                    if len(batch) == 0 or int(batches[b][0][0]) == int(
-                        batch[0][0]
-                    ):
-                        batch += batches[b]
-                        b += 1
-                new_batches.append(batch)
-                if b >= len(batches):
-                    break
-            print(f"Old: {len(batches)}, New: {len(new_batches)}")
-            batches = new_batches
 
         bs_list = [len(batch) for batch in batches]
 
