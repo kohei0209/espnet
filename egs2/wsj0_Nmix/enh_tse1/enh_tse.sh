@@ -960,7 +960,7 @@ if ! "${skip_eval}"; then
                             if [ "${score_obs}" = "false" ] && [ "${task}" = "enh" ] && [[ ! ${scoring_protocol} == *"Est_num_spk"* ]]; then
                                 scoring_protocol+=" Est_num_spk"
                             fi
-                            score_summary_module=espnet2.bin.enh_variable_number_spkeakers_score_summary
+                            score_summary_module=espnet2.bin.enh_variable_number_speakers_score_summary
                             python -m ${score_summary_module} \
                                 --score_dir "${_scoredir}" \
                                 --output_dir "${_dir}" \
