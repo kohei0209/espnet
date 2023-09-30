@@ -1,5 +1,6 @@
+task: &task enh
 optim: adam
-max_epoch: 200
+max_epoch: 175
 batch_type: folded
 sort_batch: descending
 batch_size: 4
@@ -31,7 +32,7 @@ best_model_criterion:
     - - valid
       - loss
       - min
-keep_nbest_models: 10
+keep_nbest_models: 5
 scheduler: warmupsteplr
 scheduler_conf:
     # for WarmupLR
@@ -44,7 +45,7 @@ scheduler_conf:
 model_conf:
     num_spk: 5
     share_encoder: true
-    task: enh
+    task: *task
     normalization: true
 
 train_spk2enroll: data/tr_min_8k/spk2enroll.json
@@ -75,7 +76,6 @@ extractor_conf:
     activation: relu
     norm_type: gLN
     nonlinear: prelu
-    triple_path: false
     i_eda_layer: 3
     i_adapt_layer: null
     adapt_layer_type: attn

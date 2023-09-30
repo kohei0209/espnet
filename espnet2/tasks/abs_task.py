@@ -571,7 +571,7 @@ class AbsTask(ABC):
         group.add_argument(
             "--use_tensorboard",
             type=str2bool,
-            default=False,
+            default=True,
             help="Enable tensorboard logging",
         )
         group.add_argument(

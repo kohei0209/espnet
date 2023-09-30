@@ -96,15 +96,10 @@ class DPTNet_EDA_Informed(nn.Module):
         assert (
             self.num_eda_modules % 2 == 1
         ), "number of EDA modules should be odd number"
-        # if i_eda_layer is not None:
-        #     self.sequence_aggregation = nn.ModuleList([])
-        #     self.eda = nn.ModuleList([])
-        #     for i in range(num_eda_modules):
-        #         self.sequence_aggregation.append(SequenceAggregation(input_size))
-        #         self.eda.append(EncoderDecoderAttractor(input_size))
         if i_eda_layer is not None:
             self.sequence_aggregation = SequenceAggregation(input_size)
             self.eda = EncoderDecoderAttractor(input_size)
+
         # tse related params
         self.i_adapt_layer = i_adapt_layer
         if i_adapt_layer is not None:
@@ -215,23 +210,6 @@ class DPTNet_EDA_Informed(nn.Module):
         )
         x = self.col_transformer[layer_index](x)
         x = x.view(batch, chunk_size, n_chunks, N).permute(0, 3, 1, 2)
-        return x
-
-    def channel_chunk_process(self, x, layer_index, org_batch_size):
-        batch, N, chunk_size, n_chunks = x.size()
-        x = x.view(org_batch_size, -1, N, chunk_size, n_chunks)
-        x = (
-            x.permute(0, 3, 4, 1, 2)
-            .contiguous()
-            .view(batch * chunk_size * n_chunks, -1, N)
-        )
-        x = self.chan_transformer[layer_index](x)
-        x = (
-            x.view(batch, chunk_size, n_chunks, -1, N)
-            .permute(0, 3, 4, 1, 2)
-            .contiguous()
-        )
-        x = x.view(batch, N, chunk_size, n_chunks)
         return x
 
     def eda_process(self, x, num_spk):

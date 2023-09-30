@@ -748,8 +748,8 @@ if ! "${skip_eval}"; then
         mkdir -p "${enh_exp}"; echo "${run_args} --stage 7 \"\$@\"; exit \$?" > "${enh_exp}/run_enhance.sh"; chmod +x "${enh_exp}/run_enhance.sh"
         _opts=
 
-        for task in tse; do
-            for use_true_nspk in true false; do
+        for task in enh tse; do
+            for use_true_nspk in false; do
                 # for dset in "${valid_set}" ${test_sets}; do
                 for dset in ${test_sets}; do
                     for nmix in ${inf_nums}; do
@@ -796,7 +796,7 @@ if ! "${skip_eval}"; then
                         key_file=${_data}/${_scp}
                         split_scps=""
                         if ${gpu_inference}; then
-                            _nj=1
+                            _nj=4
                         else
                             _nj=$(min "${inference_nj}" "$(<${key_file} wc -l)")
                         fi
@@ -866,8 +866,8 @@ if ! "${skip_eval}"; then
         # score_obs=true: Scoring for observation signal
         # score_obs=false: Scoring for enhanced signal
         for score_obs in true false; do
-            for task in tse; do
-                for use_true_nspk in true false; do
+            for task in enh tse; do
+                for use_true_nspk in false; do
                     # for dset in "${valid_set}" ${test_sets}; do
                     for dset in ${test_sets}; do
                         for nmix in ${inf_nums}; do
@@ -1010,7 +1010,7 @@ if "${score_with_asr}"; then
         # score_obs=true: Scoring for observation signal
         # score_obs=false: Scoring for enhanced signal
         for score_obs in true false; do
-            for task in enh; do
+            for task in enh tse; do
                 for use_true_nspk in true false; do
                     # for dset in "${valid_set}" ${test_sets}; do
                     for dset in ${test_sets}; do

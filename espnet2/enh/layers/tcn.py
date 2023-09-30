@@ -13,7 +13,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from espnet2.enh.layers.adapt_layers import make_adapt_layer
-from espnet2.enh.layers.dprnn_eda import EncoderDecoderAttractor
 
 EPS = torch.finfo(torch.get_default_dtype()).eps
 
@@ -32,6 +31,7 @@ class TemporalConvNet(nn.Module):
         out_channel=None,
         norm_type="gLN",
         causal=False,
+        pre_mask_nonlinear="linear",
         mask_nonlinear="relu",
     ):
         """Basic Module of tasnet.
@@ -49,6 +49,7 @@ class TemporalConvNet(nn.Module):
                 if it is None, `N` will be used instead.
             norm_type: BN, gLN, cLN
             causal: causal or non-causal
+            pre_mask_nonlinear: the non-linear function before masknet
             mask_nonlinear: use which non-linear function to generate mask
         """
         super().__init__()
@@ -95,9 +96,20 @@ class TemporalConvNet(nn.Module):
         # [M, B, K] -> [M, C*N, K]
         mask_conv1x1 = nn.Conv1d(B, C * self.out_channel, 1, bias=False)
         # Put together (for compatibility with older versions)
-        self.network = nn.Sequential(
-            layer_norm, bottleneck_conv1x1, temporal_conv_net, nn.PReLU(), mask_conv1x1
-        )
+        if pre_mask_nonlinear == "linear":
+            self.network = nn.Sequential(
+                layer_norm, bottleneck_conv1x1, temporal_conv_net, mask_conv1x1
+            )
+        else:
+            activ = {
+                "prelu": nn.PReLU(),
+                "relu": nn.ReLU(),
+                "tanh": nn.Tanh(),
+                "sigmoid": nn.Sigmoid(),
+            }[pre_mask_nonlinear]
+            self.network = nn.Sequential(
+                layer_norm, bottleneck_conv1x1, temporal_conv_net, activ, mask_conv1x1
+            )
 
     def forward(self, mixture_w):
         """Keep this API same with TasNet.
@@ -132,13 +144,13 @@ class TemporalConvNet(nn.Module):
         # [M, C*self.out_channel, K] -> [M, C, self.out_channel, K]
         score = score.view(M, self.C, self.out_channel, K)
         if self.mask_nonlinear == "softmax":
-            est_mask = F.softmax(score, dim=1)
+            est_mask = torch.softmax(score, dim=1)
         elif self.mask_nonlinear == "relu":
-            est_mask = F.relu(score)
+            est_mask = torch.relu(score)
         elif self.mask_nonlinear == "sigmoid":
-            est_mask = F.sigmoid(score)
+            est_mask = torch.sigmoid(score)
         elif self.mask_nonlinear == "tanh":
-            est_mask = F.tanh(score)
+            est_mask = torch.tanh(score)
         elif self.mask_nonlinear == "linear":
             est_mask = score
         else:
@@ -159,6 +171,7 @@ class TemporalConvNetInformed(TemporalConvNet):
         out_channel=None,
         norm_type="gLN",
         causal=False,
+        pre_mask_nonlinear="prelu",
         mask_nonlinear="relu",
         i_adapt_layer: int = 7,
         adapt_layer_type: str = "mul",
@@ -179,6 +192,7 @@ class TemporalConvNetInformed(TemporalConvNet):
                 if it is None, `N` will be used instead.
             norm_type: BN, gLN, cLN
             causal: causal or non-causal
+            pre_mask_nonlinear: the non-linear function before masknet
             mask_nonlinear: use which non-linear function to generate mask
             i_adapt_layer: int, index of the adaptation layer
             adapt_layer_type: str, type of adaptation layer
@@ -197,6 +211,7 @@ class TemporalConvNetInformed(TemporalConvNet):
             out_channel=out_channel,
             norm_type=norm_type,
             causal=causal,
+            pre_mask_nonlinear=pre_mask_nonlinear,
             mask_nonlinear=mask_nonlinear,
         )
         self.i_adapt_layer = i_adapt_layer
@@ -266,301 +281,6 @@ class TemporalConvNetInformed(TemporalConvNet):
         else:
             raise ValueError("Unsupported mask non-linear function")
         return est_mask
-
-
-class TemporalConvNetInformedWithAttention(TemporalConvNet):
-    def __init__(
-        self,
-        N,
-        B,
-        H,
-        P,
-        X,
-        R,
-        Sc=None,
-        out_channel=None,
-        norm_type="gLN",
-        causal=False,
-        mask_nonlinear="relu",
-        i_adapt_layer: int = 7,
-        adapt_layer_type: str = "mul",
-        adapt_enroll_dim: int = 128,
-        **adapt_layer_kwargs
-    ):
-        """Basic Module of TasNet with adaptation layers.
-
-        Args:
-            N: Number of filters in autoencoder
-            B: Number of channels in bottleneck 1 * 1-conv block
-            H: Number of channels in convolutional blocks
-            P: Kernel size in convolutional blocks
-            X: Number of convolutional blocks in each repeat
-            R: Number of repeats
-            Sc: Number of channels in skip-connection paths' 1x1-conv blocks
-            out_channel: Number of output channels
-                if it is None, `N` will be used instead.
-            norm_type: BN, gLN, cLN
-            causal: causal or non-causal
-            mask_nonlinear: use which non-linear function to generate mask
-            i_adapt_layer: int, index of the adaptation layer
-            adapt_layer_type: str, type of adaptation layer
-                see espnet2.enh.layers.adapt_layers for options
-            adapt_enroll_dim: int, dimensionality of the speaker embedding
-        """
-        super().__init__(
-            N,
-            B,
-            H,
-            P,
-            X,
-            1, # n_blocks
-            1, # n_speakers
-            Sc=Sc,
-            out_channel=out_channel,
-            norm_type=norm_type,
-            causal=causal,
-            mask_nonlinear="linear",
-        )
-        self._num_spk = 2
-        self.H = H
-        self.i_adapt_layer = i_adapt_layer
-        self.adapt_enroll_dim = adapt_enroll_dim
-        self.adapt_layer_type = adapt_layer_type
-        self.adapt_layer = make_adapt_layer(
-            adapt_layer_type,
-            indim=B,
-            enrolldim=adapt_enroll_dim,
-            ninputs=2 if self.skip_connection and adapt_layer_type=="attn" else 1,
-            **adapt_layer_kwargs
-        )
-
-        self.network2 = TemporalConvNet(
-            N,
-            B,
-            H,
-            P,
-            X,
-            3, # n_blocks
-            1, # n_speakers
-            Sc=Sc,
-            out_channel=out_channel,
-            norm_type=norm_type,
-            causal=causal,
-            mask_nonlinear=mask_nonlinear,
-        )
-
-    def forward(self, mixture_w, enroll_emb):
-        """TasNet forward with adaptation layers.
-
-        Args:
-            mixture_w: [M, N, K], M is batch size
-            enroll_emb: [M, 2*adapt_enroll_dim] if self.skip_connection
-                        [M, adapt_enroll_dim] if not self.skip_connection
-
-        Returns:
-            est_mask: [M, N, K]
-        """
-        M, N, K = mixture_w.size()
-
-        # internal separation part
-        bottleneck = self.network[:2]
-        tcns = self.network[2]
-        masknet = self.network[3:]
-        output = bottleneck(mixture_w)
-        skip_conn = 0.0
-        for i, block in enumerate(tcns):
-            for j, layer in enumerate(block):
-                tcn_out = layer(output)
-                if self.skip_connection:
-                    residual, skip = tcn_out
-                    skip_conn = skip_conn + skip
-                else:
-                    residual = tcn_out
-                output = output + residual
-
-        # Use residual output when no skip connection
-        if self.skip_connection:
-            output = masknet(skip_conn)
-        else:
-            output = masknet(output)
-        # target sound selection with attention
-        if enroll_emb is not None and self.adapt_layer_type == "attn":
-            output = output.reshape(M, -1, N, K)
-            output = self.adapt_layer(output, enroll_emb)
-        elif enroll_emb is not None and self.adapt_layer_type != "attn":
-            output = self.adapt_layer(output, enroll_emb)
-        else:
-            output = output.reshape(-1, N, K)
-
-        # mask estimation part
-        bottleneck2 = self.network2.network[:2]
-        tcns2 = self.network2.network[2]
-        masknet2 = self.network2.network[3:]
-        output = bottleneck(output)
-        skip_conn = 0.0
-        for block in tcns2:
-            for layer in block:
-                tcn_out = layer(output)
-                if self.skip_connection:
-                    residual, skip = tcn_out
-                    skip_conn = skip_conn + skip
-                else:
-                    residual = tcn_out
-                output = output + residual
-        # Use residual output when no skip connection
-        if self.skip_connection:
-            score = masknet2(skip_conn)
-        else:
-            score = masknet2(output)
-
-        # [M, self.out_channel, K]
-        if self.mask_nonlinear == "softmax":
-            est_mask = F.softmax(score, dim=1)
-        elif self.mask_nonlinear == "relu":
-            est_mask = F.relu(score)
-        elif self.mask_nonlinear == "sigmoid":
-            est_mask = F.sigmoid(score)
-        elif self.mask_nonlinear == "tanh":
-            est_mask = F.tanh(score)
-        elif self.mask_nonlinear == "linear":
-            est_mask = score
-        else:
-            raise ValueError("Unsupported mask non-linear function")
-
-        est_mask = est_mask.reshape(M, -1, N, K).unbind(dim=-3)
-        return est_mask
-
-    @property
-    def num_spk(self):
-        return self._num_spk
-
-
-class TemporalConvNetInformedEDA(TemporalConvNet):
-    def __init__(
-        self,
-        N,
-        B,
-        H,
-        P,
-        X,
-        R,
-        Sc=None,
-        out_channel=None,
-        norm_type="gLN",
-        causal=False,
-        mask_nonlinear="relu",
-        i_adapt_layer: int = 7,
-        adapt_layer_type: str = "mul",
-        adapt_enroll_dim: int = 128,
-        **adapt_layer_kwargs
-    ):
-        """Basic Module of TasNet with adaptation layers.
-
-        Args:
-            N: Number of filters in autoencoder
-            B: Number of channels in bottleneck 1 * 1-conv block
-            H: Number of channels in convolutional blocks
-            P: Kernel size in convolutional blocks
-            X: Number of convolutional blocks in each repeat
-            R: Number of repeats
-            Sc: Number of channels in skip-connection paths' 1x1-conv blocks
-            out_channel: Number of output channels
-                if it is None, `N` will be used instead.
-            norm_type: BN, gLN, cLN
-            causal: causal or non-causal
-            mask_nonlinear: use which non-linear function to generate mask
-            i_adapt_layer: int, index of the adaptation layer
-            adapt_layer_type: str, type of adaptation layer
-                see espnet2.enh.layers.adapt_layers for options
-            adapt_enroll_dim: int, dimensionality of the speaker embedding
-        """
-        super().__init__(
-            N,
-            B,
-            H,
-            P,
-            X,
-            R,
-            1,
-            Sc=Sc,
-            out_channel=out_channel,
-            norm_type=norm_type,
-            causal=causal,
-            mask_nonlinear=mask_nonlinear,
-        )
-        self.i_adapt_layer = i_adapt_layer
-        self.adapt_enroll_dim = adapt_enroll_dim
-        self.adapt_layer_type = adapt_layer_type
-        self.adapt_layer = make_adapt_layer(
-            adapt_layer_type,
-            indim=B,
-            enrolldim=adapt_enroll_dim,
-            ninputs=2 if self.skip_connection else 1,
-            **adapt_layer_kwargs
-        )
-
-        self.eda = EncoderDecoderAttractor(H)
-
-    def forward(self, mixture_w, enroll_emb):
-        """TasNet forward with adaptation layers.
-
-        Args:
-            mixture_w: [M, N, K], M is batch size
-            enroll_emb: [M, 2*adapt_enroll_dim] if self.skip_connection
-                        [M, adapt_enroll_dim] if not self.skip_connection
-
-        Returns:
-            est_mask: [M, N, K]
-        """
-        M, N, K = mixture_w.size()
-
-        bottleneck = self.network[:2]
-        tcns = self.network[2]
-        masknet = self.network[3:]
-        output = bottleneck(mixture_w)
-        skip_conn = 0.0
-        for i, block in enumerate(tcns):
-            for j, layer in enumerate(block):
-                idx = i * len(block) + j
-                is_adapt_layer = idx == self.i_adapt_layer
-                tcn_out = layer(output)
-                if self.skip_connection:
-                    residual, skip = tcn_out
-                    if is_adapt_layer:
-                        residual, skip = self.adapt_layer(
-                            (residual, skip), torch.chunk(enroll_emb, 2, dim=1)
-                        )
-                    skip_conn = skip_conn + skip
-                else:
-                    residual = tcn_out
-                    if is_adapt_layer:
-                        residual = self.adapt_layer(residual, enroll_emb)
-                output = output + residual
-
-        # Use residual output when no skip connection
-        if self.skip_connection:
-            score = masknet(skip_conn)
-        else:
-            score = masknet(output)
-
-        # [M, self.out_channel, K]
-        if self.mask_nonlinear == "softmax":
-            est_mask = F.softmax(score, dim=1)
-        elif self.mask_nonlinear == "relu":
-            est_mask = F.relu(score)
-        elif self.mask_nonlinear == "sigmoid":
-            est_mask = F.sigmoid(score)
-        elif self.mask_nonlinear == "tanh":
-            est_mask = F.tanh(score)
-        elif self.mask_nonlinear == "linear":
-            est_mask = score
-        else:
-            raise ValueError("Unsupported mask non-linear function")
-        return est_mask
-
-    @property
-    def num_spk(self):
-        return self._num_spk
 
 
 class TemporalBlock(nn.Module):
