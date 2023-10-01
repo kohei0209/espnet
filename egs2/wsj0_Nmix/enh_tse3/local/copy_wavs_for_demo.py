@@ -1,1 +1,0 @@
-../../enh_tse1/local/copy_wavs_for_demo.py

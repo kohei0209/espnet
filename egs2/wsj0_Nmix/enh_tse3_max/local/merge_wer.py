@@ -1,1 +1,0 @@
-../../enh_tse1_max/local/merge_wer.py
