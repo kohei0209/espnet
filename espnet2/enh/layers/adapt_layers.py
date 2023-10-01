@@ -133,6 +133,28 @@ class AttentionAdaptLayer(nn.Module):
         is_dualpath_process=False,
         return_attn=False,
     ):
+        """
+        AttentionAdaptLayer for speaker selection in target speaker extraction.
+        https://ieeexplore.ieee.org/abstract/document/8683448
+
+        Args:
+            indim: int,
+                Input hidden dimension.
+            enrolldim: int
+                Hidden dimension of enrollment embedding.
+            ninputs: int, optional
+                The number of inputs (default: ``1``).
+            softmax_temp: int, optional
+                Temprature of softmax funcion (default: ``1``).
+            attention_dim: int, optional
+                Hidden dimension of attention (default: ``200``).
+            hidden_dim: int, optional
+                Hidden dimension in MLP layers (default: ``200``).
+            is_dualpath_process: bool, optonal
+                Whether the backbone model is dual-path model or not (default: ``False``).
+            return_attn: bool, optional
+                If ``True``, attention weight is also returned (default:``False``).
+        """
         super().__init__()
         self.return_attn = return_attn
         self.mlp_v = nn.Sequential(
@@ -169,7 +191,7 @@ class AttentionAdaptLayer(nn.Module):
         # assert enrolldim == indim, (enrolldim, indim)
 
     def forward(self, main, enroll=None):
-        """MulAddAdaptLayer Forward.
+        """AttentionAdaptLayer Forward. Variable names follow the paper.
 
         Args:
             main: tensor or tuple or list
@@ -217,7 +239,7 @@ class AttentionAdaptLayer(nn.Module):
                 )  # (..., 1, nspk, hidden)
                 s_aux = self.mlp_aux(enroll0).mean(dim=mean_dim, keepdim=True)
 
-                # e: [batch, chunk_size, num_chunk, n_enroll, nspk, hidden] / [batch, time, n_enroll, nspk, hidden]
+                # e: [batch, chunk_size, num_chunk, n_enroll, nspk, hidden]
                 # a: [batch, chunk_size, num_chunk, n_enroll, nspk, 1]
                 e_v = self.W_v(
                     s_v
@@ -269,232 +291,10 @@ class AttentionAdaptLayer(nn.Module):
             return into_orig_type(tuple(outputs), orig_type)
 
 
-class TFAttentionAdaptLayer(nn.Module):
-    def __init__(
-        self,
-        indim,
-        enrolldim,
-        ninputs=1,
-        softmax_temp=1,
-        attention_dim=512,
-        hidden_dim=512,
-        return_attn=False,
-    ):
-        super().__init__()
-        self.return_attn = return_attn
-        self.mlp_v = nn.Sequential(
-            nn.Linear(indim, hidden_dim),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, attention_dim),
-        )
-        self.mlp_iv = nn.Sequential(
-            nn.Linear(indim, hidden_dim),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, attention_dim),
-        )
-        self.mlp_aux = nn.Sequential(
-            nn.Linear(enrolldim, hidden_dim),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, attention_dim),
-        )
-
-        self.W_v = nn.Linear(attention_dim, attention_dim, bias=False)
-        self.W_iv = nn.Linear(attention_dim, attention_dim, bias=False)
-        self.W_aux = nn.Linear(attention_dim, attention_dim, bias=False)
-        self.w = nn.Linear(attention_dim, 1, bias=False)
-        self.b = nn.Parameter(torch.randn(attention_dim))
-
-        self.attention_activation = nn.Tanh()
-        self.softmax = nn.Softmax(dim=1)
-        self.alpha = softmax_temp
-        self.indim = indim
-
-        # assert enrolldim == indim, (enrolldim, indim)
-
-    def forward(self, main, enroll):
-        """MulAddAdaptLayer Forward.
-
-        Args:
-            main: tensor or tuple or list
-                  activations in the main neural network, which are adapted
-                  tuple/list may be useful when we want to apply the adaptation
-                    to both normal and skip connection at once
-            enroll: tensor or tuple or list
-                    embedding extracted from enrollment
-                    tuple/list may be useful when we want to apply the adaptation
-                      to both normal and skip connection at once
-        """
-        outputs = []
-        orig_type = type(main)
-
-        if not isinstance(main, tuple):
-            main = (main,)
-            enroll = (enroll,)
-        for main0, enroll0 in zip(main, enroll):
-            # main: (batch, nspk, hidden, freq, frame)
-            # enroll: (batch, hidden, freq, frame)
-            assert type(main0) == type(enroll0)
-            batch, num_spk, hidden, freq, frame = main0.shape
-            main0 = main0.transpose(
-                -1, -3
-            )  # (batch, num_spk, frame, freq, hidden)
-            enroll0 = enroll0.transpose(-1, -3)  # (batch, frame, freq, hidden)
-            mean_dim = (-3,)
-            # print("1", main0.shape, enroll0.shape, flush=True)
-            s_v = self.mlp_v(main0)  # (batch, num_spk, frame, freq, hidden)
-            s_iv = self.mlp_iv(main0).mean(
-                dim=mean_dim, keepdim=True
-            )  # (batch, num_spk, 1, freq, hidden)
-            s_aux = self.mlp_aux(enroll0).mean(
-                dim=mean_dim, keepdim=True
-            )  # (batch, 1, freq, hidden)
-            # print("2", s_v.shape, s_iv.shape, s_aux.shape, flush=True)
-
-            # e: (batch, num_spk, num_enroll, frame, freq, hidden)
-            # a: (batch, num_spk, num_enroll, frame, freq, 1)
-            e_v = self.W_v(s_v)  # (batch, num_spk, frame, freq, hidden)
-            e_iv = self.W_iv(s_iv)  # (batch, num_spk, 1, freq, hidden)
-            e_aux = self.W_aux(s_aux)  # (batch, 1, freq, hidden)
-            # print("3", e_v.shape, e_iv.shape, e_aux.shape, flush=True)
-            a = (
-                e_v[:, :, None]
-                + e_iv[:, :, None]
-                + e_aux[:, :, None, None]
-                + self.b
-            )
-            a = self.w(self.attention_activation(a))
-            a = self.softmax(a * self.alpha)
-            out = (a * main0[..., None, :, :, :]).sum(dim=1)[:, 0]
-            # print("4", a.shape, main0[..., None, :, :, :].shape, out.shape, flush=True)
-            outputs.append(out.transpose(-1, -3))
-        if self.return_attn:
-            return into_orig_type(tuple(outputs), orig_type), a
-        else:
-            return into_orig_type(tuple(outputs), orig_type)
-
-
-class CrossAttentionAdaptLayer(nn.Module):
-    def __init__(
-        self,
-        indim,
-        enrolldim,
-        ninputs=1,
-        attention_dim=512,
-        mlp_hidden_dim=512,
-        ff_hidden_dim=512,
-        num_heads=4,
-        return_attn=False,
-    ):
-        super().__init__()
-        self.return_attn = return_attn
-        self.indim = indim
-        self.attention_dim = attention_dim
-
-        # MLP before cross-attention
-        self.mlp = nn.Sequential(
-            nn.Linear(indim, mlp_hidden_dim),
-            nn.Linear(mlp_hidden_dim, mlp_hidden_dim),
-            nn.ReLU(),
-            nn.Linear(mlp_hidden_dim, attention_dim),
-        )
-        # MLP before cross-attention for auxiliary input
-        self.mlp_aux = nn.Sequential(
-            nn.Linear(enrolldim, mlp_hidden_dim),
-            nn.Linear(mlp_hidden_dim, mlp_hidden_dim),
-            nn.ReLU(),
-            nn.Linear(mlp_hidden_dim, attention_dim),
-        )
-        # cross attention
-        self.cross_attention = nn.MultiheadAttention(
-            attention_dim, num_heads=num_heads, batch_first=True
-        )
-        from espnet2.enh.separator.tfgridnet_separator import (
-            LayerNormalization4D,
-        )
-
-        self.norm_attn = LayerNormalization4D(attention_dim)
-
-        # after cross attention
-        self.feed_forward = nn.Sequential(
-            nn.Linear(attention_dim, ff_hidden_dim),
-            nn.ReLU(),
-            nn.Linear(ff_hidden_dim, indim),
-        )
-        self.norm_ff = LayerNormalization4D(indim)
-
-    def forward(self, main, enroll=None):
-        """CrossAttentionAdaptation Forward.
-
-        Args:
-            main: tensor or tuple or list
-                  activations in the main neural network, which are adapted
-                  tuple/list may be useful when we want to apply the adaptation
-                    to both normal and skip connection at once
-            enroll: tensor or tuple or list
-                    embedding extracted from enrollment
-                    tuple/list may be useful when we want to apply the adaptation
-                      to both normal and skip connection at once
-        """
-
-        outputs = []
-        orig_type = type(main)
-
-        if not isinstance(main, tuple):
-            main = (main,)
-            enroll = (enroll,)
-        for main0, enroll0 in zip(main, enroll):
-            # main: (batch, nspk, indim, freq, frame)
-            # enroll: (batch, indim, freq, frame)
-            assert type(main0) == type(enroll0)
-
-            # process internal separation outputs
-            batch, num_spk, indim, freq, frame = main0.shape
-            main0 = main0.permute(
-                0, 3, 4, 1, 2
-            )  # (batch, freq, frame, num_spk, indim)
-            s_v = self.mlp(
-                main0
-            )  # (batch, freq, frame, num_spk, attention_dim)
-            s_v = s_v.reshape(
-                -1, num_spk, self.attention_dim
-            )  # (batch*freq*frame, num_spk, attention_dim)
-
-            # process auxliary input for tse
-            enroll0 = enroll0.movedim(
-                1, -1
-            )  # (batch, freq, frame_aux, attention_dim)
-            s_aux = self.mlp_aux(enroll0).mean(
-                dim=-2, keepdim=True
-            )  # (batch, freq, 1, attention_dim)
-            s_aux = torch.tile(s_aux, (1, 1, frame, 1)).reshape(
-                -1, 1, self.attention_dim
-            )  # (batch*freq*frame, 1, attention_dim)
-
-            # cross attention
-            out, attn_weight = self.cross_attention(s_aux, s_v, s_v)
-            out = out.reshape(batch, freq, frame, self.attention_dim)
-            out = self.norm_attn(out.transpose(-1, 1)).transpose(-1, 1)
-
-            # feed forward
-            out = self.feed_forward(out)
-            out = self.norm_ff(out.transpose(-1, 1))
-            outputs.append(out.transpose(-1, -2))
-
-        if self.return_attn:
-            return into_orig_type(tuple(outputs), orig_type), attn_weight
-        else:
-            return into_orig_type(tuple(outputs), orig_type)
-
-
 # aliases for possible adaptation layer types
 adaptation_layer_types = {
     "concat": ConcatAdaptLayer,
     "muladd": MulAddAdaptLayer,
     "mul": partial(MulAddAdaptLayer, do_addition=False),
     "attn": AttentionAdaptLayer,
-    "tfattn": TFAttentionAdaptLayer,
-    "crossattn": CrossAttentionAdaptLayer,
 }
