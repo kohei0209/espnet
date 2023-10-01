@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-# Copyright 2020  Shanghai Jiao Tong University (Authors: Chenda Li, Wangyou Zhang)
-# Apache 2.0
 set -e
 set -u
 set -o pipefail
@@ -25,7 +23,7 @@ wsj_full_wav=$PWD/data/wsj0
 wsj_mix_wav=$PWD/data/wsj0_mix
 wsj_mix_scripts=$PWD/data/wsj0_mix/scripts
 wsj_scp_output_dir=$PWD/data
-anechoic_mix_dir=/mnt/aoni04/saijo/universal_se/espnet_use/egs2/wsj0_Nmix/enh_tse1  # like ${PWD}/../enh_tse1
+anechoic_mix_dir=  # /path/to/enh_tse1, like  ${PWD}/../enh_tse1
 wham_noise=
 
 
@@ -78,9 +76,9 @@ if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
             unzip ${dir}/wham_noise.zip -d ${dir}
         fi
         wham_noise=${dir}/wham_noise
-    else
-        # make symbolic link
-        ln -s "$wham_noise" ${PWD}/data/
+    # else
+    #     # make symbolic link
+    #     ln -s "$wham_noise" ${PWD}/data
     fi
 
     # make anechoic 1-mix

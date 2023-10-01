@@ -76,7 +76,6 @@ extractor_conf:
   activation: relu
   norm_type: gLN
   nonlinear: prelu
-  triple_path: false
   i_eda_layer: 3
   i_adapt_layer: 4
   adapt_layer_type: attn_improved
@@ -100,7 +99,7 @@ criterions:
       independent_perm: true
 
 init_param:
-  - ./exp/enh_enh_dptnet_eda4thlayer_1-5mix_1bce_usePretrained_raw/ave_epochs_100_99_97_94_92.pth
+  - ./exp/enh_enh_dptnet_eda4thlayer_1-5mix_1bce_usePretrained_raw/valid.loss.ave_5best.pth
 resume: false
 freeze_param:
   - encoder

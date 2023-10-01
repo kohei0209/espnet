@@ -749,7 +749,7 @@ if ! "${skip_eval}"; then
         _opts=
 
         for task in enh tse; do
-            for use_true_nspk in false; do
+            for use_true_nspk in true false; do
                 # for dset in "${valid_set}" ${test_sets}; do
                 for dset in ${test_sets}; do
                     for nmix in ${inf_nums}; do
@@ -867,7 +867,7 @@ if ! "${skip_eval}"; then
         # score_obs=false: Scoring for enhanced signal
         for score_obs in true false; do
             for task in enh tse; do
-                for use_true_nspk in false; do
+                for use_true_nspk in true false; do
                     # for dset in "${valid_set}" ${test_sets}; do
                     for dset in ${test_sets}; do
                         for nmix in ${inf_nums}; do
@@ -928,11 +928,6 @@ if ! "${skip_eval}"; then
                                     _inf_scp+="--inf_scp ${_dir}/spk${spk}.scp "
                                 done
                                 flexible_numspk=false
-                                # if [[ "${ref_num}" -ne "${inf_num}" ]]; then
-                                #     flexible_numspk=true
-                                # else
-                                #     flexible_numspk=false
-                                # fi
                             fi
 
                             # 2. Submit scoring jobs
@@ -957,14 +952,15 @@ if ! "${skip_eval}"; then
                                 done
                             done
 
+                            scoring_protocol_tmp=${scoring_protocol}
                             if [ "${score_obs}" = "false" ] && [ "${task}" = "enh" ] && [[ ! ${scoring_protocol} == *"Est_num_spk"* ]]; then
-                                scoring_protocol+=" Est_num_spk"
+                                scoring_protocol_tmp+=" Est_num_spk"
                             fi
                             score_summary_module=espnet2.bin.enh_variable_number_speakers_score_summary
                             python -m ${score_summary_module} \
                                 --score_dir "${_scoredir}" \
                                 --output_dir "${_dir}" \
-                                --protocols "${scoring_protocol}" \
+                                --protocols "${scoring_protocol_tmp}" \
                                 --max_num_spk ${nmix}
                         done
                     done

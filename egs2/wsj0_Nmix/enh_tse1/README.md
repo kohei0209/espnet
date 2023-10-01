@@ -8,6 +8,13 @@ Please refer to this document:
 https://espnet.github.io/espnet/installation.html
 
 
+## Install other dependencies
+We use Transformers for ASR evaluation
+```
+# install simulation toolkit
+pip install transformers
+```
+
 ## Data preparation
 1. Change directory: ```cd ./egs2/wsj0_Nmix/enh_tse1```.
 1. Fill your wsj0 and wsj1 paths in ```./db.sh```.

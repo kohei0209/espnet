@@ -31,7 +31,7 @@ best_model_criterion:
     - - valid
       - loss
       - min
-keep_nbest_models: 10
+keep_nbest_models: 5
 scheduler: warmupsteplr
 scheduler_conf:
     # for WarmupLR
@@ -75,7 +75,6 @@ extractor_conf:
     activation: relu
     norm_type: gLN
     nonlinear: prelu
-    triple_path: false
     i_eda_layer: 3
     i_adapt_layer: null
     adapt_layer_type: attn
@@ -95,6 +94,7 @@ criterions:
           weight: 1.0
           independent_perm: true
 
+# we used pre-trained model (using anechoic version)
 init_param:
-    - ../enh_tse1/exp/enh_enh_dptnet_eda4thlayer_2-5mix_1bce_raw/175epoch.pth
+    - ../enh_tse1/exp/enh_enh_dptnet_eda4thlayer_2-5mix_1bce_raw/valid.loss.ave_5best.pth
 resume: false
