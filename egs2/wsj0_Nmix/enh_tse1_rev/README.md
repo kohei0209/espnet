@@ -33,6 +33,7 @@ The default config is run with a signle RTX3090 when separation training and wit
 ```
 # separation training
 # we recommend to use pre-trained model if you have already trained the model with anechoic version
+# please change the path of the pre-trained model parameter in the config
 ./run.sh --stage 6 --stop_stage 6 --enh_config enh_dptnet_eda4thlayer_1-5mix_1bce_usePretrained.yaml
 
 # if you'd like to start training from scratch, run the following command

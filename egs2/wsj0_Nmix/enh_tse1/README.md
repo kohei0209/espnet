@@ -11,7 +11,7 @@ https://espnet.github.io/espnet/installation.html
 ## Install other dependencies
 We use Transformers for ASR evaluation
 ```
-# install simulation toolkit
+# install transformers
 pip install transformers
 ```
 

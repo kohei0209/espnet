@@ -23,7 +23,7 @@ wsj_full_wav=$PWD/data/wsj0
 wsj_mix_wav=$PWD/data/wsj0_mix
 wsj_mix_scripts=$PWD/data/wsj0_mix/scripts
 wsj_scp_output_dir=$PWD/data
-anechoic_mix_dir=  # /path/to/enh_tse1, like  ${PWD}/../enh_tse1
+anechoic_mix_dir="$(dirname "${PWD}")/enh_tse1"  # /path/to/enh_tse1, like  ${PWD}/../enh_tse1
 wham_noise=
 
 
@@ -150,7 +150,8 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
             --source_folder ./local/enroll_scp/${task}_min_8k \
             --target_folder ${wsj_scp_output_dir}/${task}_${min_or_max}_${sample_rate} \
             --source_words ../enh_tse1/ /min/ /wav8k/ \
-            --target_words ${PWD}/ /${min_or_max}/ /wav${sample_rate}/
+            --target_words "$(dirname "${PWD}")/enh_tse1/" /${min_or_max}/ /wav${sample_rate}/
+            # --target_words ${PWD}/ /${min_or_max}/ /wav${sample_rate}/
 
         # for training set, we prepare scp files here
         if [ "$task" = "tr" ]; then
