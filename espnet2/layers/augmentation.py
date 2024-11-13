@@ -6,6 +6,8 @@ import librosa
 import numpy as np
 import torch
 import torchaudio
+from pedalboard import MP3Compressor, Pedalboard
+from torchaudio.io import AudioEffector, CodecConfig
 
 # Avaiable sampling rates for bandwidth limitation
 SAMPLE_RATES = (8000, 16000, 22050, 24000, 32000, 44100, 48000)
@@ -369,6 +371,7 @@ def time_stretch(
     return ret
 
 
+'''
 def codecs(
     waveform,
     sample_rate: int,
@@ -417,6 +420,104 @@ def codecs(
         bits_per_sample=bits_per_sample,
     )
     return ret.squeeze(0)
+'''
+
+
+def codecs(
+    waveform,
+    sample_rate: int,
+    format: str,
+    encoder: str = None,
+    qscale: int = None,
+):
+    encoder = None if encoder == "None" else encoder
+    if encoder is not None and isinstance(encoder, list):
+        encoder = np.random.choice(encoder, 1)[0]
+    if qscale is not None and isinstance(qscale, list):
+        qscale = np.random.randint(*qscale)
+
+    assert format in ["mp3", "ogg"], format
+    assert encoder in [None, "None", "vorbis", "opus"], encoder
+
+    if waveform.ndim == 1:
+        waveform = waveform.unsqueeze(-1)
+    elif waveform.ndim == 2:
+        waveform = waveform.T  # (channel, sample) -> (sample, channel)
+    try:
+        module = AudioEffector(
+            format=format,
+            encoder=encoder,
+            codec_config=CodecConfig(qscale=qscale),
+            pad_end=True,
+        )
+        output = module.apply(waveform, sample_rate)
+    except Exception as e:
+        print(format, encoder, qscale, flush=True)
+        print(e, flush=True)
+
+    if output.shape[0] < waveform.shape[0]:
+        zeros = np.zeros((waveform.shape[0] - output.shape[0], output.shape[1]))
+        output = np.concatenate((output, zeros), axis=0)
+    elif output.shape[0] > waveform.shape[0]:
+        output = output[: waveform.shape[0]]
+
+    assert waveform.shape == output.shape, (waveform.shape, output.shape)
+    output = output.squeeze(-1)
+    return (
+        output.T if output.ndim == 2 else output
+    )  # (sample, channel) -> (channel, sample)
+
+
+def mp3_codec_compression(waveform, sample_rate: int, vbr_quality: float):
+    assert 0.0 <= min(vbr_quality) < max(vbr_quality) <= 10.0
+    vbr_quality_ = np.random.uniform(*vbr_quality)
+    module = Pedalboard([MP3Compressor(vbr_quality=vbr_quality_)])
+    output = module(waveform, sample_rate)
+    return output
+
+
+def packet_loss(
+    waveform,
+    sample_rate: int,
+    packet_duration_ms: int = 20,
+    packet_loss_rate: List[float] = [0.05, 0.25],
+    max_continuous_packet_loss: int = 10,
+):
+    # speech duration in ms and the number of packets
+    speech_length = waveform.shape[-1]
+    speech_duration_ms = speech_length / sample_rate * 1000
+    num_packets = int(speech_duration_ms // packet_duration_ms)
+
+    # randomly select the packet loss rate and calculate the packet loss duration
+    packet_loss_rate = np.random.uniform(*packet_loss_rate)
+    packet_loss_duration_ms = packet_loss_rate * speech_duration_ms
+
+    # calculate the number of packets to be zeroed out
+    num_packet_loss = int(round(packet_loss_duration_ms / packet_duration_ms, 0))
+
+    # list of length of each packet loss
+    packet_loss_lengths = []
+    for _ in range(num_packet_loss):
+        num_continuous_packet_loss = np.random.randint(1, max_continuous_packet_loss)
+        packet_loss_lengths.append(num_continuous_packet_loss)
+
+        if num_packet_loss - sum(packet_loss_lengths) <= max_continuous_packet_loss:
+            packet_loss_lengths.append(num_packet_loss - sum(packet_loss_lengths))
+            break
+
+    packet_loss_start_indices = np.random.choice(
+        range(num_packets), len(packet_loss_lengths), replace=False
+    )
+    packet_loss_indices = []
+    for idx, length in zip(packet_loss_start_indices, packet_loss_lengths):
+        packet_loss_indices += list(range(idx, idx + length))
+
+    for idx in packet_loss_indices:
+        start = idx * packet_duration_ms * sample_rate // 1000
+        end = (idx + 1) * packet_duration_ms * sample_rate // 1000
+        waveform[..., start:end] = 0
+
+    return waveform
 
 
 def preemphasis(waveform, sample_rate: int, coeff: float = 0.97):
@@ -578,4 +679,7 @@ effects_dict = {
     "polarity_inverse": polarity_inverse,
     "reverse": reverse,
     "corrupt_phase": corrupt_phase,
+    "codec": codecs,
+    "mp3_codec": mp3_codec_compression,
+    "packet_loss": packet_loss,
 }

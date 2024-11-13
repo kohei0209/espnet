@@ -182,10 +182,10 @@ class ChunkIterFactory(AbsIterFactory):
                 min(lg, self.chunk_max_abs_length) for lg in chunk_lengths if lg < L
             ]
             if len(chunk_lengths) == 0 and getattr(self, "discard_short_samples", True):
-                logging.warning(
-                    f"The length of '{id_}' is {L}, but it is shorter than "
-                    f"any candidates of chunk-length: {self.chunk_lengths}"
-                )
+                # logging.warning(
+                #     f"The length of '{id_}' is {L}, but it is shorter than "
+                #     f"any candidates of chunk-length: {self.chunk_lengths}"
+                # )
                 continue
 
             # Convert numpy array to number

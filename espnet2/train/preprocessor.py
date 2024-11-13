@@ -278,6 +278,10 @@ class CommonPreprocessor(AbsPreprocessor):
         rir_path = np.random.choice(rirs)
         rir = None
         if rir_path is not None:
+            # try:
+            #     rir, fs = soundfile.read(rir_path, dtype=np.float64, always_2d=True)
+            # except Exception as e:
+            #     print(f"RIR error occurred {rir_path}: {e}", flush=True)
             rir, fs = soundfile.read(rir_path, dtype=np.float64, always_2d=True)
 
             if single_channel:
@@ -287,9 +291,9 @@ class CommonPreprocessor(AbsPreprocessor):
             # rir: (Nmic, Time)
             rir = rir.T
             if tgt_fs and fs != tgt_fs:
-                logging.warning(
-                    f"Resampling RIR to match the sampling rate ({fs} -> {tgt_fs} Hz)"
-                )
+                # logging.warning(
+                #     f"Resampling RIR to match the sampling rate ({fs} -> {tgt_fs} Hz)"
+                # )
                 rir = librosa.resample(
                     rir, orig_sr=fs, target_sr=tgt_fs, res_type="kaiser_fast"
                 )
@@ -297,9 +301,12 @@ class CommonPreprocessor(AbsPreprocessor):
             # speech: (Nmic, Time)
             speech = speech[:1]
             # Note that this operation doesn't change the signal length
-            speech = scipy.signal.convolve(speech, rir, mode="full")[
-                :, : speech.shape[1]
-            ]
+            try:
+                speech = scipy.signal.convolve(speech, rir, mode="full")[
+                    :, : speech.shape[1]
+                ]
+            except Exception as e:
+                print(f"RIR error occurred {speech.shape} {rir.shape}: {e}", flush=True)
             # Reverse mean power to the original power
             power2 = (speech[detect_non_silence(speech)] ** 2).mean()
             speech = np.sqrt(power / max(power2, 1e-10)) * speech
@@ -329,11 +336,11 @@ class CommonPreprocessor(AbsPreprocessor):
                 if f.frames == nsamples_:
                     noise = f.read(dtype=np.float64, always_2d=True)
                 elif f.frames < nsamples_:
-                    if f.frames / nsamples_ < self.short_noise_thres:
-                        logging.warning(
-                            f"Noise ({f.frames}) is much shorter than "
-                            f"speech ({nsamples_}) in dynamic mixing"
-                        )
+                    # if f.frames / nsamples_ < self.short_noise_thres:
+                    #     logging.warning(
+                    #         f"Noise ({f.frames}) is much shorter than "
+                    #         f"speech ({nsamples_}) in dynamic mixing"
+                    #     )
                     offset = np.random.randint(0, nsamples_ - f.frames)
                     # noise: (Time, Nmic)
                     noise = f.read(dtype=np.float64, always_2d=True)
@@ -357,9 +364,9 @@ class CommonPreprocessor(AbsPreprocessor):
             # noise: (Nmic, Time)
             noise = noise.T
             if tgt_fs and fs != tgt_fs:
-                logging.warning(
-                    f"Resampling noise to match the sampling rate ({fs} -> {tgt_fs} Hz)"
-                )
+                # logging.warning(
+                #     f"Resampling noise to match the sampling rate ({fs} -> {tgt_fs} Hz)"
+                # )
                 noise = librosa.resample(
                     noise, orig_sr=fs, target_sr=tgt_fs, res_type="kaiser_fast"
                 )
@@ -1250,11 +1257,11 @@ class EnhPreprocessor(CommonPreprocessor):
         ]
         length = speech_refs[0].shape[0]
         if length <= tgt_length:
-            if length < tgt_length:
-                logging.warning(
-                    f"The sample ({uid}) is not cropped due to its short length "
-                    f"({length} < {tgt_length})."
-                )
+            # if length < tgt_length:
+            #     logging.warning(
+            #         f"The sample ({uid}) is not cropped due to its short length "
+            #         f"({length} < {tgt_length})."
+            #     )
             return 0, length
 
         start = np.random.randint(0, length - tgt_length)
